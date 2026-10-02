@@ -1,0 +1,35 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 显示工具链版本
+        run: swift --version
+
+      - name: 构建
+        run: swift build
+
+      - name: 单元测试（swift-testing）
+        run: swift test
+
+      - name: 端到端自检（skctl selftest）
+        run: swift run skctl selftest
+
+      - name: 打包 .app
+        run: Scripts/build-app.sh release
+
+      - name: 上传应用包
+        uses: actions/upload-artifact@v4
+        with:
+          name: ShutterKeeper-app
+          path: build/快门闪选.app
+          if-no-files-found: error

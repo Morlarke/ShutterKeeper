@@ -1,0 +1,18 @@
+# 构建产物
+.build/
+build/
+outputs/
+work/
+
+# Xcode
+*.xcodeproj
+xcuserdata/
+DerivedData/
+
+# macOS
+.DS_Store
+._*
+
+# SwiftPM
+.swiftpm/
+Package.resolved
