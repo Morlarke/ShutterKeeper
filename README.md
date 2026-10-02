@@ -7,6 +7,7 @@ Swift + SwiftUI 编写，**零第三方依赖**（只用系统框架与系统自
 
 * 版本：**beta0.1**
 * 作者：快门镖局-陈师 · [thechengsir@foxmail.com](mailto:thechengsir@foxmail.com)
+* 许可证：**MIT**（见 [LICENSE](LICENSE)）
 
 ---
 
@@ -358,3 +359,11 @@ Scripts/make-icon.swift         把源图裁成圆角图标并生成多尺寸 .i
   个别相机在 RAW 里自带评分，Lightroom 的判断以侧车为准。
 * **TIFF / DNG 的 XMP 只认 IFD0 里的 tag 700**：这是 Adobe 系软件的标准位置；
   极少数工具把 XMP 放在别处时会读不到（写入时会明确报「没有 XMP 段」）。
+
+---
+
+## 许可证
+
+[MIT](LICENSE) © 2026 快门镖局-陈师（thechengsir@foxmail.com）
+
+可以自由使用、修改、分发、商用，只需保留版权声明与许可证原文。
