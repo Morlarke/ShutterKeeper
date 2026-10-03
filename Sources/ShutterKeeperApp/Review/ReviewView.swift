@@ -49,31 +49,39 @@ struct ReviewView: View {
                 }
                 if review.panelsVisible {
                     separator
-                    FilmstripView(
-                        groups: review.visibleGroups,
-                        selectedID: review.currentID,
-                        ratings: { review.rating(for: $0) },
-                        thumbnailSize: review.thumbnailSize,
-                        theme: theme,
-                        cache: review.thumbnailCache,
-                        onSelect: { review.select(id: $0) }
-                    )
+                FilmstripView(
+                    groups: review.visibleGroups,
+                    selectedID: review.currentID,
+                    selectedIDs: review.selection,
+                    ratings: { review.rating(for: $0) },
+                    thumbnailSize: review.thumbnailSize,
+                    theme: theme,
+                    cache: review.thumbnailCache,
+                    onSelect: { id, extend, range in
+                        review.select(id, extend: extend, range: range)
+                    },
+                    onContextMenuShown: { review.prepareContextAction(for: $0) },
+                    onRotate: { review.rotate(clockwise: $0) },
+                    onReveal: { review.revealSelection() },
+                    onShowInfo: { review.showInfoForSelection() },
+                    onDelete: { review.requestDelete() }
+                )
                     .frame(height: review.thumbnailSize + 52)
                 }
             }
         }
         .alert(
-            "删除这一张？",
+            review.pendingDelete.count > 1 ? "删除选中的 \(review.pendingDelete.count) 张？" : "删除这一张？",
             isPresented: Binding(
-                get: { review.deleteTarget != nil },
-                set: { if !$0 { review.deleteTarget = nil } }
+                get: { !review.pendingDelete.isEmpty },
+                set: { if !$0 { review.cancelDelete() } }
             ),
-            presenting: review.deleteTarget
+            presenting: review.pendingDelete
         ) { _ in
             Button("移入废纸篓", role: .destructive) { review.confirmDelete() }
-            Button("取消", role: .cancel) { review.deleteTarget = nil }
-        } message: { group in
-            Text("将把 \(group.deletionTargets.count) 个文件移入废纸篓：\n\(group.deletionTargets.map(\.fileName).joined(separator: "、"))")
+            Button("取消", role: .cancel) { review.cancelDelete() }
+        } message: { groups in
+            Text(deleteMessage(for: groups))
         }
         .alert(
             "出错了",
@@ -90,6 +98,18 @@ struct ReviewView: View {
 
     private var separator: some View {
         Rectangle().fill(theme.separator).frame(height: 1)
+    }
+
+    private func deleteMessage(for groups: [AssetGroup]) -> String {
+        let fileCount = groups.reduce(0) { $0 + $1.deletionTargets.count }
+        var lines = ["将把这 \(groups.count) 张片子的 \(fileCount) 个文件移入废纸篓（配对成员和 .xmp 附属文件一起）。"]
+        let names = groups.prefix(6).map(\.displayName)
+        lines.append("")
+        lines.append(names.joined(separator: "、"))
+        if groups.count > names.count {
+            lines.append("…等共 \(groups.count) 张")
+        }
+        return lines.joined(separator: "\n")
     }
 
     private func separator(vertical: Bool) -> some View {
@@ -140,6 +160,13 @@ struct ReviewView: View {
                     Text(dateGroup)
                         .font(.system(size: 11))
                         .foregroundStyle(theme.secondaryText)
+                }
+                if review.selectionCount > 1 {
+                    Text("已选 \(review.selectionCount) 张")
+                        .font(.system(size: 11, weight: .medium))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(Color.accentColor.opacity(0.25)))
                 }
             } else {
                 Text("没有可显示的片子")

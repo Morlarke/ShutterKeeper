@@ -33,6 +33,10 @@ public enum ShortcutAction: String, CaseIterable, Codable, Sendable {
     case undo
     case iconView
     case columnView
+    case rotateLeft
+    case rotateRight
+    case selectAll
+    case showInfo
 
     public var displayName: String {
         switch self {
@@ -63,6 +67,10 @@ public enum ShortcutAction: String, CaseIterable, Codable, Sendable {
         case .undo: return "撤销上一次改名"
         case .iconView: return "改成图标视图"
         case .columnView: return "改成分栏视图"
+        case .rotateLeft: return "向左旋转 90°"
+        case .rotateRight: return "向右旋转 90°"
+        case .selectAll: return "全选"
+        case .showInfo: return "文件简介"
         }
     }
 
@@ -138,6 +146,10 @@ public enum ShortcutAction: String, CaseIterable, Codable, Sendable {
         case .undo: return KeyShortcut(keyCode: 6, modifiers: [.command])
         case .iconView: return KeyShortcut(keyCode: 18, modifiers: [.command])
         case .columnView: return KeyShortcut(keyCode: 19, modifiers: [.command])
+        case .rotateLeft: return KeyShortcut(keyCode: 33, modifiers: [.command])
+        case .rotateRight: return KeyShortcut(keyCode: 30, modifiers: [.command])
+        case .selectAll: return KeyShortcut(keyCode: 0, modifiers: [.command])
+        case .showInfo: return KeyShortcut(keyCode: 34, modifiers: [.command])
         }
     }
 

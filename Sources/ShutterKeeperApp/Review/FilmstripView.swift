@@ -3,14 +3,22 @@ import ShutterKeeperCore
 import SwiftUI
 
 /// 底部胶片条：只显示当前文件夹内的片子，配对组只出现一项。
+///
+/// 支持多选：点一下选中一张，⌘ 点击加选/减选，⇧ 点击选一段，右键出菜单。
 struct FilmstripView: View {
     let groups: [AssetGroup]
     let selectedID: String?
+    let selectedIDs: Set<String>
     let ratings: (AssetGroup) -> Int?
     let thumbnailSize: CGFloat
     let theme: AppTheme
     let cache: ThumbnailCache?
-    let onSelect: (String) -> Void
+    let onSelect: (String, Bool, Bool) -> Void
+    let onContextMenuShown: (AssetGroup) -> Void
+    let onRotate: (Bool) -> Void
+    let onReveal: () -> Void
+    let onShowInfo: () -> Void
+    let onDelete: () -> Void
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -19,14 +27,42 @@ struct FilmstripView: View {
                     ForEach(groups) { group in
                         FilmstripItem(
                             group: group,
-                            isSelected: group.id == selectedID,
+                            isCurrent: group.id == selectedID,
+                            isSelected: selectedIDs.contains(group.id),
                             rating: ratings(group),
                             size: thumbnailSize,
                             theme: theme,
                             cache: cache
                         )
                         .id(group.id)
-                        .onTapGesture { onSelect(group.id) }
+                        .onTapGesture {
+                            let flags = NSEvent.modifierFlags
+                            onSelect(group.id, flags.contains(.command), flags.contains(.shift))
+                        }
+                        .contextMenu {
+                            Button("向右旋转 90°（⌘]）") {
+                                onContextMenuShown(group)
+                                onRotate(true)
+                            }
+                            Button("向左旋转 90°（⌘[）") {
+                                onContextMenuShown(group)
+                                onRotate(false)
+                            }
+                            Divider()
+                            Button("在访达中显示") {
+                                onContextMenuShown(group)
+                                onReveal()
+                            }
+                            Button("文件简介（⌘I）") {
+                                onContextMenuShown(group)
+                                onShowInfo()
+                            }
+                            Divider()
+                            Button("删除…", role: .destructive) {
+                                onContextMenuShown(group)
+                                onDelete()
+                            }
+                        }
                     }
                 }
                 .padding(.horizontal, 12)
@@ -45,6 +81,7 @@ struct FilmstripView: View {
 
 private struct FilmstripItem: View {
     let group: AssetGroup
+    let isCurrent: Bool
     let isSelected: Bool
     let rating: Int?
     let size: CGFloat
@@ -81,12 +118,27 @@ private struct FilmstripItem: View {
                         }
                     }
                 }
+                if isSelected {
+                    VStack {
+                        HStack {
+                            Spacer()
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 13))
+                                .foregroundStyle(.white, Color.accentColor)
+                                .padding(3)
+                        }
+                        Spacer()
+                    }
+                }
             }
             .frame(width: size, height: size)
             .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 4, style: .continuous)
-                    .strokeBorder(isSelected ? Color.accentColor : theme.separator, lineWidth: isSelected ? 2 : 1)
+                    .strokeBorder(
+                        isCurrent ? Color.accentColor : (isSelected ? Color.accentColor.opacity(0.7) : theme.separator),
+                        lineWidth: isCurrent ? 2.5 : (isSelected ? 2 : 1)
+                    )
             )
 
             HStack(spacing: 1) {

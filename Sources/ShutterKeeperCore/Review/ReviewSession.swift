@@ -191,6 +191,30 @@ public struct ReviewSession: Sendable {
         return removed
     }
 
+    /// 批量删除若干张（多选删除用），落点规则与单张删除一致。
+    @discardableResult
+    public mutating func remove(ids: Set<String>) -> [AssetGroup] {
+        guard !ids.isEmpty else { return [] }
+        let visibleIndexBefore = currentVisibleIndex
+        var removed: [AssetGroup] = []
+        groups.removeAll { group in
+            guard ids.contains(group.id) else { return false }
+            removed.append(group)
+            ratings.removeValue(forKey: group.id)
+            return true
+        }
+        guard !removed.isEmpty else { return [] }
+        currentID = nil
+        let visible = visibleGroups
+        guard !visible.isEmpty else { return removed }
+        if let visibleIndexBefore {
+            currentID = visible[min(visibleIndexBefore, visible.count - 1)].id
+        } else {
+            currentID = visible.first?.id
+        }
+        return removed
+    }
+
     // MARK: - 重新载入
 
     public mutating func reload(groups: [AssetGroup], ratings: [String: Int], keepingSelection: Bool = true) {

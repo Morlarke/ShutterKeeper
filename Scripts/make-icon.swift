@@ -69,28 +69,57 @@ var minX = analysisWidth
 var minY = analysisHeight
 var maxX = 0
 var maxY = 0
-// 阈值高一点更贴近「图标本体」的边界，免得把外圈微弱的光晕一起框进来
-let threshold = 58
-for y in 0..<analysisHeight {
-    for x in 0..<analysisWidth {
-        let color = pixel(x, y)
-        let diff = max(
-            abs(color.r - background.r),
-            abs(color.g - background.g),
-            abs(color.b - background.b)
-        )
-        guard diff > threshold else { continue }
-        minX = min(minX, x)
-        maxX = max(maxX, x)
-        minY = min(minY, y)
-        maxY = max(maxY, y)
+/// 在给定阈值下求内容外接矩形。
+func contentBounds(threshold: Int) -> (minX: Int, minY: Int, maxX: Int, maxY: Int)? {
+    var bounds = (minX: analysisWidth, minY: analysisHeight, maxX: 0, maxY: 0)
+    for y in 0..<analysisHeight {
+        for x in 0..<analysisWidth {
+            let color = pixel(x, y)
+            let diff = max(
+                abs(color.r - background.r),
+                abs(color.g - background.g),
+                abs(color.b - background.b)
+            )
+            guard diff > threshold else { continue }
+            bounds.minX = min(bounds.minX, x)
+            bounds.maxX = max(bounds.maxX, x)
+            bounds.minY = min(bounds.minY, y)
+            bounds.maxY = max(bounds.maxY, y)
+        }
     }
+    guard bounds.minX < bounds.maxX, bounds.minY < bounds.maxY else { return nil }
+    return bounds
 }
 
-if minX >= maxX || minY >= maxY {
+// 自适应挑阈值：从最灵敏开始试，取第一个「框出来的内容占画面 45%–92%」的结果。
+// 深色背景的图标（外圈有光晕）会一路试到较大的阈值；浅色底的图标用很小的阈值就能框住整个方块。
+let candidateThresholds = [3, 6, 12, 20, 32, 48, 58, 80, 110]
+var chosenThreshold = candidateThresholds.last ?? 58
+var chosenBounds: (minX: Int, minY: Int, maxX: Int, maxY: Int)?
+for threshold in candidateThresholds {
+    guard let bounds = contentBounds(threshold: threshold) else { continue }
+    let width = Double(bounds.maxX - bounds.minX + 1) / Double(analysisWidth)
+    let height = Double(bounds.maxY - bounds.minY + 1) / Double(analysisHeight)
+    if width >= 0.45, width <= 0.92, height >= 0.45, height <= 0.92 {
+        chosenThreshold = threshold
+        chosenBounds = bounds
+        break
+    }
+    // 记下最后一个有效结果作为兜底
+    chosenThreshold = threshold
+    chosenBounds = bounds
+}
+
+if let bounds = chosenBounds {
+    minX = bounds.minX
+    minY = bounds.minY
+    maxX = bounds.maxX
+    maxY = bounds.maxY
+} else {
     print("没有找到图标内容，直接用整张图")
     minX = 0; minY = 0; maxX = analysisWidth - 1; maxY = analysisHeight - 1
 }
+let pickedThreshold = chosenThreshold
 
 let scaleToFull = CGFloat(width) / CGFloat(analysisWidth)
 var cropRect = CGRect(
@@ -100,7 +129,7 @@ var cropRect = CGRect(
     height: CGFloat(maxY - minY + 1) * scaleToFull
 )
 
-print("检测到内容范围：x \(minX)…\(maxX)，y \(minY)…\(maxY)（分析图 \(analysisWidth)×\(analysisHeight)）")
+print("检测到内容范围：x \(minX)…\(maxX)，y \(minY)…\(maxY)，阈值 \(pickedThreshold)（分析图 \(analysisWidth)×\(analysisHeight)）")
 
 // 裁成正方形（以中心为准），再留 3% 的余量（macOS 图标本体不铺满整张画布）
 let side = max(cropRect.width, cropRect.height)

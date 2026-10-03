@@ -32,7 +32,7 @@ git init
 git config user.name "快门镖局-陈师"
 git config user.email "thechengsir@foxmail.com"
 git add -A
-git commit -m "快门闪选 beta0.1：导入 / 批量改名 / 审阅打分，与 Lightroom Classic 互认星级"
+git commit -m "快门闪选 beta-0.11：导入 / 批量改名 / 审阅打分，与 Lightroom Classic 互认星级"
 git branch -M main
 
 # 在 https://github.com/new 建一个空仓库（不要勾选 README / .gitignore / license），然后：

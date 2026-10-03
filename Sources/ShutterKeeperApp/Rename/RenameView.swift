@@ -63,6 +63,21 @@ struct RenameView: View {
         } message: {
             Text(rename.errorMessage ?? "")
         }
+        .alert(
+            rename.pendingDelete.count > 1 ? "删除选中的 \(rename.pendingDelete.count) 张？" : "删除这一张？",
+            isPresented: Binding(
+                get: { !rename.pendingDelete.isEmpty },
+                set: { if !$0 { rename.cancelDelete() } }
+            ),
+            presenting: rename.pendingDelete
+        ) { _ in
+            Button("移入废纸篓", role: .destructive) { rename.confirmDelete() }
+            Button("取消", role: .cancel) { rename.cancelDelete() }
+        } message: { groups in
+            let fileCount = groups.reduce(0) { $0 + $1.deletionTargets.count }
+            let names = groups.prefix(6).map(\.displayName).joined(separator: "、")
+            Text("将把这 \(groups.count) 张片子的 \(fileCount) 个文件移入废纸篓（配对成员和 .xmp 附属文件一起）。\n\n\(names)")
+        }
     }
 
     private var separator: some View {
@@ -216,9 +231,9 @@ struct RenameView: View {
                 .minimumScaleFactor(0.65)
 
             HStack(spacing: 10) {
-                miniStat("片子", "\(rename.groups.count)")
-                miniStat("要改名", "\(rename.currentPlan.fileCount)")
-                miniStat("不变", "\(rename.currentPlan.unchangedCount)")
+                miniStat(rename.isRenamingSubset ? "选中" : "片子", "\(rename.isRenamingSubset ? rename.selection.count : rename.groups.count)")
+                miniStat("要改名", "\(rename.pendingFileCount)")
+                miniStat("不变", "\(rename.pendingUnchangedCount)")
                 if rename.conflictCount > 0 {
                     miniStat("重名", "\(rename.conflictCount)", warning: true)
                 }
@@ -256,6 +271,20 @@ struct RenameView: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
                 SectionTitle(text: "按拍摄日期分组", theme: theme)
+
+                if rename.isRenamingSubset {
+                    HStack(spacing: 5) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 10))
+                        Text("只改选中的 \(rename.selection.count) 张")
+                            .font(.system(size: 11, weight: .medium))
+                        Button("取消选择") { _ = rename.clearSelectionIfNeeded() }
+                            .controlSize(.mini)
+                    }
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(Capsule().fill(Color.accentColor.opacity(0.22)))
+                }
 
                 Text("统一填写")
                     .font(.system(size: 11))

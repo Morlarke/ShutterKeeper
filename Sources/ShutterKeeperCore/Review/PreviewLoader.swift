@@ -32,7 +32,7 @@ public actor PreviewLoader {
     /// 屏幕预览。`maxPixel` 一般取预览区像素宽度的 1.5 倍左右。
     public func preview(for group: AssetGroup, maxPixel: Int) async -> Preview? {
         guard let file = group.previewFile, file.kind != .video else { return nil }
-        let key = "\(file.url.path)|\(maxPixel)"
+        let key = Self.cacheKey(for: file, suffix: "\(maxPixel)")
         return await load(key: key, url: file.url, maxPixel: maxPixel, fullResolution: false)
     }
 
@@ -41,7 +41,7 @@ public actor PreviewLoader {
         guard let file = group.previewFile, file.kind != .video else { return nil }
         guard let size = Self.orientedPixelSize(of: file.url) else { return nil }
         let maxPixel = Int(max(size.width, size.height))
-        let key = "\(file.url.path)|full"
+        let key = Self.cacheKey(for: file, suffix: "full")
         return await load(key: key, url: file.url, maxPixel: maxPixel, fullResolution: true)
     }
 
@@ -49,7 +49,7 @@ public actor PreviewLoader {
     public func prefetch(groups: [AssetGroup], maxPixel: Int) async {
         for group in groups {
             guard let file = group.previewFile, file.kind != .video else { continue }
-            let key = "\(file.url.path)|\(maxPixel)"
+            let key = Self.cacheKey(for: file, suffix: "\(maxPixel)")
             if cache[key] != nil { continue }
             _ = await load(key: key, url: file.url, maxPixel: maxPixel, fullResolution: false)
         }
@@ -62,7 +62,14 @@ public actor PreviewLoader {
 
     public func isCached(_ group: AssetGroup, maxPixel: Int) -> Bool {
         guard let file = group.previewFile else { return false }
-        return cache["\(file.url.path)|\(maxPixel)"] != nil
+        return cache[Self.cacheKey(for: file, suffix: "\(maxPixel)")] != nil
+    }
+
+    /// 缓存键里带上修改时间：文件被旋转、改过星级之后会自动重新解码，不会用到旧图。
+    static func cacheKey(for file: FileRef, suffix: String) -> String {
+        let stamp = (try? file.url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
+            .map { String($0.timeIntervalSince1970) } ?? "0"
+        return "\(file.url.path)|\(stamp)|\(suffix)"
     }
 
     // MARK: - 内部

@@ -52,6 +52,8 @@ struct ShutterKeeperCLI {
                 print("已生成 \(path)")
             case "import":
                 try commandImport(rest)
+            case "rotate":
+                try commandRotate(rest)
             case "selftest":
                 runSelfTest()
             default:
@@ -90,6 +92,7 @@ struct ShutterKeeperCLI {
               skctl import <来源> --dest <父目录> --name 婚礼 [--apply] [--backup <目录>]
                               [--merge] [--delete-source] [--date yyyy-MM-dd]
                                               从 SD 卡/文件夹导入（默认只预览）
+              skctl rotate <文件>... [--left]  旋转 90°（非破坏性，只改方向标记）
               skctl selftest                  跑完整自检（临时目录，不留痕迹）
             """
         )
@@ -218,6 +221,32 @@ struct ShutterKeeperCLI {
     static func runSelfTest() {
         var test = SelfTest()
         if !test.run() { exit(1) }
+    }
+
+    /// 非破坏性旋转：只改文件内部的方向标记（RAW 改写侧车）。
+    static func commandRotate(_ arguments: [String]) throws {
+        let clockwise = !arguments.contains("--left")
+        let paths = arguments.filter { !$0.hasPrefix("--") }
+        guard !paths.isEmpty else {
+            fail("用法：skctl rotate <文件>... [--left]")
+            exit(2)
+        }
+        for path in paths {
+            let url = URL(fileURLWithPath: path)
+            let group = AssetGroup(
+                folder: url.deletingLastPathComponent(),
+                baseName: url.deletingPathExtension().lastPathComponent,
+                files: [FileRef(url: url)]
+            )
+            let before = RotateService.orientation(of: group)
+            let outcome = RotateService.rotate(group, clockwise: clockwise)
+            let after = RotateService.orientation(of: group)
+            print("\(url.lastPathComponent)：\(EXIFOrientation.describe(before ?? 1)) → \(EXIFOrientation.describe(after ?? 1))")
+            for file in outcome.updatedFiles { print("  已写入方向标记：\(file.lastPathComponent)") }
+            for file in outcome.updatedSidecars { print("  已写入侧车：\(file.lastPathComponent)") }
+            for skipped in outcome.skipped { print("  跳过：\(skipped.url.lastPathComponent)（\(skipped.reason)）") }
+            for error in outcome.errors { print("  失败：\(error)") }
+        }
     }
 
     /// 从 SD 卡或文件夹导入（与界面同一套计划与执行逻辑）。
@@ -713,6 +742,8 @@ struct ShutterKeeperCLI {
                     kCGImagePropertyTIFFMake: "ShutterKeeper",
                     kCGImagePropertyTIFFModel: "Selftest Camera",
                 ],
+                // 让生成的文件带方向标记，自检才能验证非破坏性旋转
+                kCGImagePropertyOrientation: 1,
             ] as CFDictionary
         )
         guard CGImageDestinationFinalize(destination) else {

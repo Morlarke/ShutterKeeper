@@ -14,7 +14,7 @@ cd "$ROOT"
 
 APP_NAME="快门闪选"
 BUNDLE_ID="com.shutterkeeper.app"
-VERSION="beta0.1"
+VERSION="beta-0.11"
 BUILD_NUMBER="1"
 AUTHOR="快门镖局-陈师"
 CONTACT="thechengsir@foxmail.com"

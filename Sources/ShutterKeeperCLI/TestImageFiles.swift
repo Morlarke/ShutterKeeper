@@ -12,7 +12,9 @@ enum TestTIFF {
         var xmp = xmpText(rating: rating, padding: padding)
         var xmpBytes = [UInt8](xmp.utf8)
 
-        let entryCount = includeXMP ? 10 : 9
+        // 条目：ImageWidth/Length、BitsPerSample、Compression、Photometric、
+        // Orientation、StripOffsets、SamplesPerPixel、RowsPerStrip、StripByteCounts（+ XMP）
+        let entryCount = includeXMP ? 11 : 10
         let dataStart = 8 + 2 + entryCount * 12 + 4
         let pixelOffset = dataStart
         let xmpOffset = pixelOffset + 1
@@ -30,6 +32,7 @@ enum TestTIFF {
         entry(258, 3, 1, 8)                              // BitsPerSample: 8（单通道，内联）
         entry(259, 3, 1, 1)                              // Compression: none
         entry(262, 3, 1, 1)                              // Photometric: BlackIsZero
+        entry(274, 3, 1, 1)                              // Orientation: 正常
         entry(273, 4, 1, UInt32(pixelOffset))            // StripOffsets
         entry(277, 3, 1, 1)                              // SamplesPerPixel
         entry(278, 4, 1, 1)                              // RowsPerStrip

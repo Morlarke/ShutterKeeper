@@ -76,6 +76,13 @@ struct ContentView: View {
             }
         }
         keyboard.onEscape = {
+            // 先让当前模块清掉多选，再考虑退出全屏
+            if state.selectedTab == .review, state.review?.clearSelectionIfNeeded() == true {
+                return true
+            }
+            if state.selectedTab == .rename, state.rename.clearSelectionIfNeeded() {
+                return true
+            }
             if FullScreenController.isFullScreen {
                 FullScreenController.exit()
                 return true

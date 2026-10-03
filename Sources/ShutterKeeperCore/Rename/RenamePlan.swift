@@ -37,10 +37,13 @@ public struct RenameGroupPlan: Identifiable, Sendable {
 public struct RenameOperation: Sendable, Hashable {
     public let originalURL: URL
     public let finalURL: URL
+    /// 这个文件属于哪一张片子（配对组 id），用于「只改选中的」。
+    public let assetID: String
 
-    public init(originalURL: URL, finalURL: URL) {
+    public init(originalURL: URL, finalURL: URL, assetID: String = "") {
         self.originalURL = originalURL
         self.finalURL = finalURL
+        self.assetID = assetID
     }
 
     public var isNoop: Bool {
@@ -60,16 +63,19 @@ public struct RenameFilePreview: Identifiable, Hashable, Sendable {
     public let newName: String
     public let kind: MediaKind
     public let isSidecar: Bool
+    /// 这个文件属于哪一张片子（配对组 id），多选与删除都按「张」算。
+    public let assetID: String
 
     public var id: String { originalURL.path }
     public var originalName: String { originalURL.lastPathComponent }
     public var willChange: Bool { newName != originalName }
 
-    public init(originalURL: URL, newName: String, kind: MediaKind, isSidecar: Bool) {
+    public init(originalURL: URL, newName: String, kind: MediaKind, isSidecar: Bool, assetID: String) {
         self.originalURL = originalURL
         self.newName = newName
         self.kind = kind
         self.isSidecar = isSidecar
+        self.assetID = assetID
     }
 }
 

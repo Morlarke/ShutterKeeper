@@ -44,6 +44,7 @@ struct SelfTest {
             try rename(root: root)
             try imageFormats(root: root)
             try importFlow(root: root)
+            try rotation(root: root)
             reviewSession()
             shortcuts()
         } catch {
@@ -251,6 +252,89 @@ struct SelfTest {
     }
 
     // MARK: - 审阅模块逻辑
+
+    /// 旋转：非破坏性，只改方向标记（JPG/TIFF 文件内、RAW 写侧车）。
+    private mutating func rotation(root: URL) throws {
+        section("15. 旋转（非破坏性）")
+        let folder = root.appendingPathComponent("rotate", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+
+        /// 取「除方向标记以外」的全部字节，用来证明没有碰到别的地方。
+        func bytesOutsideOrientation(_ url: URL) throws -> Data {
+            let raw = try Data(contentsOf: url)
+            guard let range = try OrientationWriter.orientationByteRange(of: url) else { return raw }
+            var result = raw.prefix(range.lowerBound)
+            result.append(raw.suffix(from: range.upperBound))
+            return Data(result)
+        }
+
+        // 1. JPG：文件内部 EXIF 方向标记
+        let jpeg = folder.appendingPathComponent("ROT.JPG")
+        try ShutterKeeperCLI.writeTestJPEG(to: jpeg, captureDate: "2026:09:27 10:00:00")
+        let jpegSize = try Data(contentsOf: jpeg).count
+        check(try OrientationWriter.readOrientation(of: jpeg) == 1, "测试 JPG 的方向标记是 1")
+        let jpegOtherBytes = try bytesOutsideOrientation(jpeg)
+        let jpegGroup = AssetGroup(folder: folder, baseName: "ROT", files: [FileRef(url: jpeg)])
+        let jpegOutcome = RotateService.rotate(jpegGroup, clockwise: true)
+        check(jpegOutcome.updatedFiles.count == 1, "JPG 已写入方向标记")
+        check(try OrientationWriter.readOrientation(of: jpeg) == 6, "向右转 90°：1 → 6")
+        check(try Data(contentsOf: jpeg).count == jpegSize, "JPG 文件大小不变")
+        check(try bytesOutsideOrientation(jpeg) == jpegOtherBytes, "JPG 除方向标记外逐字节一致")
+        _ = RotateService.rotate(jpegGroup, clockwise: true)
+        check(try OrientationWriter.readOrientation(of: jpeg) == 3, "再转一次：6 → 3（180°）")
+        _ = RotateService.rotate(jpegGroup, clockwise: false)
+        check(try OrientationWriter.readOrientation(of: jpeg) == 6, "向左转回来：3 → 6")
+
+        // 2. TIFF：同样是文件内部的方向标记
+        let tiff = folder.appendingPathComponent("ROT.TIF")
+        try TestTIFF.write(to: tiff, rating: nil, padding: 256)
+        check(try OrientationWriter.readOrientation(of: tiff) == 1, "测试 TIFF 的方向标记是 1")
+        let tiffSize = try Data(contentsOf: tiff).count
+        let tiffOtherBytes = try bytesOutsideOrientation(tiff)
+        let tiffGroup = AssetGroup(folder: folder, baseName: "ROT", files: [FileRef(url: tiff, kind: .tiff)])
+        _ = RotateService.rotate(tiffGroup, clockwise: true)
+        check(try OrientationWriter.readOrientation(of: tiff) == 6, "TIFF 向右转：1 → 6")
+        check(try Data(contentsOf: tiff).count == tiffSize, "TIFF 文件大小不变")
+        check(try bytesOutsideOrientation(tiff) == tiffOtherBytes, "TIFF 除方向标记外逐字节一致")
+
+        // 3. RAW：方向写进 .xmp 侧车，且不能破坏 Lightroom 的修图设置
+        let rawURL = folder.appendingPathComponent("ROT.NEF")
+        try Data("raw".utf8).write(to: rawURL)
+        let lightroomSidecar = """
+        <?xpacket begin="\u{FEFF}" id="W5M0MpCehiHzreSzNTczkc9d"?>
+        <x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Adobe XMP Core 7.0">
+         <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+          <rdf:Description rdf:about=""
+            xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/"
+            xmlns:xmp="http://ns.adobe.com/xap/1.0/"
+            xmp:Rating="3"
+            crs:Exposure2012="+0.35">
+           <crs:ToneCurveName2012>Medium Contrast</crs:ToneCurveName2012>
+          </rdf:Description>
+         </rdf:RDF>
+        </x:xmpmeta>
+        <?xpacket end="w"?>
+        """
+        try Data(lightroomSidecar.utf8).write(to: rawURL.deletingPathExtension().appendingPathExtension("xmp"))
+        let rawGroup = AssetGroup(folder: folder, baseName: "ROT", files: [FileRef(url: rawURL)])
+        let rawOutcome = RotateService.rotate(rawGroup, clockwise: true)
+        check(rawOutcome.updatedSidecars.count == 1, "RAW 写了侧车文件")
+        let sidecar = try String(contentsOf: rawURL.deletingPathExtension().appendingPathExtension("xmp"), encoding: .utf8)
+        check(XMPPacket.orientation(in: sidecar) == 6, "侧车里的 tiff:Orientation = 6")
+        check(sidecar.contains(#"crs:Exposure2012="+0.35""#), "Lightroom 修图设置没被破坏")
+        check(Self.isWellFormedXML(sidecar), "改写后的侧车仍是合法 XML")
+        _ = RotateService.rotate(rawGroup, clockwise: false)
+        let sidecarBack = try String(contentsOf: rawURL.deletingPathExtension().appendingPathExtension("xmp"), encoding: .utf8)
+        check(XMPPacket.orientation(in: sidecarBack) == 1, "再向左转回来：6 → 1")
+
+        // 4. 不支持的格式要明确报出来，而不是悄悄跳过
+        let png = folder.appendingPathComponent("ROT.PNG")
+        try TestPNG.write(to: png, rating: 0, padding: 64)
+        let pngGroup = AssetGroup(folder: folder, baseName: "ROT", files: [FileRef(url: png, kind: .png)])
+        let pngOutcome = RotateService.rotate(pngGroup, clockwise: true)
+        check(pngOutcome.updatedFiles.isEmpty && pngOutcome.skipped.count == 1, "PNG 明确报告不支持（不写文件）")
+        check(pngOutcome.errors.isEmpty, "不支持不等于出错")
+    }
 
     /// 导入：项目文件夹命名、RAW+JPG 配对、附属文件、备份、历史、冲突、取消。
     private mutating func importFlow(root: URL) throws {
@@ -532,6 +616,8 @@ struct SelfTest {
         check(jpegPreview?.newName == "20260927_婚礼_001.JPG", "JPG 的新名字：\(jpegPreview?.newName ?? "无")")
         check(jpegPreview?.kind == .jpeg, "JPG 的类型标记正确")
         check(plan.files.first { $0.originalName == "DSC_0001.xmp" }?.isSidecar == true, "侧车文件被标记为附属文件")
+        check(plan.operations.allSatisfy { !$0.assetID.isEmpty }, "每个改文件操作都带上了所属片子 id（支持只改选中的）")
+        check(plan.files.allSatisfy { !$0.assetID.isEmpty }, "文件预览也都带上了所属片子 id")
 
         // 多段自定义文本：日期_文本1_文本2_序号
         let multiPlan = RenamePlanner.plan(
@@ -724,8 +810,8 @@ struct SelfTest {
         }
         check(spaceConflict, "把 0 星改成空格会与全屏/播放冲突")
 
-        try? store.set(KeyShortcut(keyCode: 0, modifiers: [.command]), for: .deleteCurrent)
-        check(store.shortcut(for: .deleteCurrent).displayString == "⌘A", "自定义快捷键已保存")
+        try? store.set(KeyShortcut(keyCode: 0, modifiers: [.command, .shift]), for: .deleteCurrent)
+        check(store.shortcut(for: .deleteCurrent).displayString == "⇧⌘A", "自定义快捷键已保存")
         check(store.isCustomized(.deleteCurrent), "标记为已自定义")
         store.reset(.deleteCurrent)
         check(store.shortcut(for: .deleteCurrent).displayString == "⌫", "恢复默认快捷键")

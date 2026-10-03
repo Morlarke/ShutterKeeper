@@ -19,6 +19,41 @@ struct RenameBrowserView: View {
             RenameColumnBrowser(rename: rename, theme: theme)
         }
     }
+
+    /// 右键菜单：先把这个文件所属的片子选上，再执行动作。
+    @ViewBuilder
+    static func assetContextMenu(_ rename: RenameState, assetID: String) -> some View {
+        Button("向右旋转 90°（⌘]）") {
+            rename.prepareContextAction(forAssetID: assetID)
+            rename.rotate(clockwise: true)
+        }
+        Button("向左旋转 90°（⌘[）") {
+            rename.prepareContextAction(forAssetID: assetID)
+            rename.rotate(clockwise: false)
+        }
+        Divider()
+        Button("在访达中显示") {
+            rename.prepareContextAction(forAssetID: assetID)
+            rename.revealSelection()
+        }
+        Button("文件简介（⌘I）") {
+            rename.prepareContextAction(forAssetID: assetID)
+            rename.showInfoForSelection()
+        }
+        Divider()
+        Button("删除…", role: .destructive) {
+            rename.prepareContextAction(forAssetID: assetID)
+            rename.requestDelete()
+        }
+    }
+}
+
+extension RenameIconBrowser {
+    /// 图标视图里的右键菜单（转发到统一实现）。
+    @ViewBuilder
+    fileprivate func assetContextMenu(for assetID: String) -> some View {
+        RenameBrowserView.assetContextMenu(rename, assetID: assetID)
+    }
 }
 
 // MARK: - 图标视图
@@ -41,7 +76,24 @@ private struct RenameIconBrowser: View {
                     }
                 }
                 ForEach(rename.currentPlan.files) { file in
-                    RenameFileCell(file: file, cache: cache, theme: theme)
+                    RenameFileCell(
+                        file: file,
+                        cache: cache,
+                        theme: theme,
+                        isSelected: rename.selection.contains(file.assetID)
+                    )
+                    .onTapGesture {
+                        let flags = NSEvent.modifierFlags
+                        rename.select(
+                            file.assetID,
+                            extend: flags.contains(.command),
+                            range: flags.contains(.shift),
+                            order: rename.currentPlan.files.map(\.assetID)
+                        )
+                    }
+                    .contextMenu {
+                        assetContextMenu(for: file.assetID)
+                    }
                 }
             }
             .padding(18)
@@ -88,6 +140,7 @@ private struct RenameFileCell: View {
     let file: RenameFilePreview
     let cache: ThumbnailCache?
     let theme: AppTheme
+    let isSelected: Bool
 
     @State private var image: CGImage?
 
@@ -109,8 +162,19 @@ private struct RenameFileCell: View {
             .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .strokeBorder(theme.separator, lineWidth: 1)
+                    .strokeBorder(
+                        isSelected ? Color.accentColor : theme.separator,
+                        lineWidth: isSelected ? 2.5 : 1
+                    )
             )
+            .overlay(alignment: .topTrailing) {
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.white, Color.accentColor)
+                        .padding(3)
+                }
+            }
 
             Text(file.originalName)
                 .font(.system(size: 10.5))
@@ -185,19 +249,16 @@ private struct RenameColumnBrowser: View {
     private func column(for directory: URL) -> some View {
         let isCurrent = directory.standardizedFileURL == rename.folder?.standardizedFileURL
         RenameColumn(
+            rename: rename,
             directory: directory,
             rows: rename.rows(for: directory),
             loaded: rename.isColumnLoaded(directory),
             isCurrent: isCurrent,
-            highlightedIndex: isCurrent ? rename.highlightedIndex : nil,
             selectedFolderURL: nextPathElement(after: directory),
             theme: theme,
             width: columnWidth,
             onSelectFolder: { url, index in
                 rename.selectFolder(url, rowIndex: index, isCurrentColumn: isCurrent)
-            },
-            onSelectFile: { index in
-                rename.highlightedIndex = index
             }
         )
         .id(directory)
@@ -215,16 +276,15 @@ private struct RenameColumnBrowser: View {
 }
 
 private struct RenameColumn: View {
+    @ObservedObject var rename: RenameState
     let directory: URL
     let rows: [RenameBrowserRow]
     let loaded: Bool
     let isCurrent: Bool
-    let highlightedIndex: Int?
     let selectedFolderURL: URL?
     let theme: AppTheme
     let width: CGFloat
     let onSelectFolder: (URL, Int) -> Void
-    let onSelectFile: (Int) -> Void
 
     var body: some View {
         ScrollView {
@@ -270,7 +330,7 @@ private struct RenameColumn: View {
 
     private func folderRow(_ folder: URL, index: Int) -> some View {
         let selected = isCurrent
-            ? highlightedIndex == index
+            ? rename.highlightedIndex == index
             : folder.standardizedFileURL == selectedFolderURL?.standardizedFileURL
         return HStack(spacing: 5) {
             Image(systemName: "folder.fill")
@@ -294,10 +354,16 @@ private struct RenameColumn: View {
         .foregroundStyle(selected ? Color.white : theme.primaryText)
         .contentShape(Rectangle())
         .onTapGesture { onSelectFolder(folder, index) }
+        .contextMenu {
+            Button("进入文件夹") { onSelectFolder(folder, index) }
+            Button("在访达中显示") { FileActions.reveal([folder]) }
+        }
     }
 
     private func fileRow(_ file: RenameFilePreview, index: Int) -> some View {
-        let selected = highlightedIndex == index
+        let isSelected = rename.selection.contains(file.assetID)
+        let isHighlighted = isCurrent && rename.highlightedIndex == index
+        let selected = isHighlighted || isSelected
         return VStack(alignment: .leading, spacing: 1) {
             HStack(spacing: 5) {
                 Image(systemName: symbol(for: file))
@@ -308,6 +374,11 @@ private struct RenameColumn: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Spacer(minLength: 0)
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 9))
+                        .foregroundStyle(selected ? Color.white : Color.accentColor)
+                }
             }
             if file.willChange {
                 Text(file.newName)
@@ -326,7 +397,17 @@ private struct RenameColumn: View {
         )
         .foregroundStyle(selected ? Color.white : theme.primaryText)
         .contentShape(Rectangle())
-        .onTapGesture { onSelectFile(index) }
+        .onTapGesture {
+            let flags = NSEvent.modifierFlags
+            let order = rows.compactMap { row -> String? in
+                if case .file(let preview) = row { return preview.assetID }
+                return nil
+            }
+            rename.select(file.assetID, extend: flags.contains(.command), range: flags.contains(.shift), order: order)
+        }
+        .contextMenu {
+            RenameBrowserView.assetContextMenu(rename, assetID: file.assetID)
+        }
     }
 
     private func symbol(for file: RenameFilePreview) -> String {

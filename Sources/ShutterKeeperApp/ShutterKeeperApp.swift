@@ -48,6 +48,18 @@ struct ShutterKeeperDesktopApp: App {
                     Button("清除星级筛选") { review.setFilter(.inactive) }
                         .disabled(!review.session.filter.isActive)
                     Divider()
+                    Button("向右旋转 90°") { review.rotate(clockwise: true) }
+                        .disabled(review.actionTargets.isEmpty)
+                    Button("向左旋转 90°") { review.rotate(clockwise: false) }
+                        .disabled(review.actionTargets.isEmpty)
+                    Button("在访达中显示") { review.revealSelection() }
+                    Button("文件简介") { review.showInfoForSelection() }
+                    Divider()
+                    Button("全选") { review.selectAllVisible() }
+                        .disabled(review.visibleGroups.isEmpty)
+                    Button("取消选择") { review.clearSelection() }
+                        .disabled(review.selectionCount == 0)
+                    Divider()
                     Button("适应窗口") { review.applyZoom(.fit) }
                     Button("1:1 像素") { review.applyZoom(.actualSize) }
                     Button("放大") { review.applyZoom(.zoomIn) }

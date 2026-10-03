@@ -67,6 +67,12 @@ final class RenameState: ObservableObject {
     @Published var highlightedIndex = 0
     private var pendingHighlightName: String?
 
+    /// 多选中的片子（配对组 id）。为空时改名作用于整个文件夹。
+    @Published private(set) var selection: Set<String> = []
+    private var selectionAnchor: String?
+    /// 等待确认删除的片子。
+    @Published var pendingDelete: [AssetGroup] = []
+
     private var plan = RenamePlan(
         settings: RenameSettings(),
         renameGroups: [],
@@ -77,10 +83,10 @@ final class RenameState: ObservableObject {
     )
 
     var currentPlan: RenamePlan { plan }
-    var canApply: Bool { folder != nil && !plan.operations.isEmpty && !isWorking }
+    var canApply: Bool { folder != nil && !pendingOperations.isEmpty && !isWorking }
     var canUndo: Bool { !lastOperations.isEmpty && !isWorking }
     var example: String? { plan.example }
-    var conflictCount: Int { plan.conflicts.count }
+    var conflictCount: Int { pendingPlan.conflicts.count }
 
     // MARK: - 扫描
 
@@ -232,8 +238,16 @@ final class RenameState: ObservableObject {
     // MARK: - 计划
 
     func rebuildPlan() {
+        // 计划永远基于整个文件夹：图标/分栏视图要显示所有文件，
+        // 选中只决定「实际改哪些」（见 pendingOperations）。
+        let targets = groups
+        guard !targets.isEmpty else {
+            plan = RenamePlan(settings: settings, renameGroups: [], operations: [], conflicts: [], examples: [], unchangedCount: 0)
+            buckets = []
+            return
+        }
         // 先用空文本跑一次，拿到「日期 + 照片/视频」的分组 id
-        let probe = RenamePlanner.plan(groups: groups, settings: settings)
+        let probe = RenamePlanner.plan(groups: targets, settings: settings)
         var texts: [String: String] = [:]
         for bucket in probe.renameGroups {
             if textSegments[bucket.id] == nil {
@@ -241,9 +255,44 @@ final class RenameState: ObservableObject {
             }
             texts[bucket.id] = joinedText(for: bucket.id)
         }
-        let plan = RenamePlanner.plan(groups: groups, texts: texts, settings: settings)
+        let plan = RenamePlanner.plan(groups: targets, texts: texts, settings: settings)
         buckets = plan.renameGroups
         self.plan = plan
+    }
+
+    /// 改名的作用对象：有选中就只改选中的，否则整个文件夹。
+    var planAssets: [AssetGroup] {
+        selection.isEmpty ? groups : groups.filter { selection.contains($0.id) }
+    }
+
+    var isRenamingSubset: Bool { !selection.isEmpty }
+
+    /// 这次真正会执行的文件操作。
+    var pendingOperations: [RenameOperation] {
+        guard selection.isEmpty else {
+            return plan.operations.filter { selection.contains($0.assetID) }
+        }
+        return plan.operations
+    }
+
+    /// 这次会动的文件数（右上角统计用）。
+    var pendingFileCount: Int { pendingOperations.count }
+
+    /// 选中范围内「名字不变」的文件数。
+    var pendingUnchangedCount: Int {
+        plan.files.filter { file in
+            !file.willChange && (selection.isEmpty || selection.contains(file.assetID))
+        }.count
+    }
+
+    /// 交给执行器的计划（把操作列表换成筛选后的）。
+    var pendingPlan: RenamePlan {
+        var result = plan
+        result.operations = pendingOperations
+        result.conflicts = plan.conflicts.filter { conflict in
+            pendingOperations.contains { $0.originalURL == conflict.source }
+        }
+        return result
     }
 
     /// 某一组当前的分段文本（不足的按段数补齐）。
@@ -316,6 +365,147 @@ final class RenameState: ObservableObject {
 
     // MARK: - 快捷键
 
+    // MARK: - 多选、删除、旋转
+
+    func select(_ id: String, extend: Bool, range: Bool) {
+        select(id, extend: extend, range: range, order: nil)
+    }
+
+    /// `order` 是视图里实际显示的顺序（图标视图是「文件」的顺序，分栏视图是当前列的顺序）；
+    /// ⇧ 连选按这个顺序算，才和访达一致。
+    func select(_ id: String, extend: Bool, range: Bool, order: [String]?) {
+        let orderIDs: [String] = {
+            guard let order else { return groups.map(\.id) }
+            var seen = Set<String>()
+            return order.filter { seen.insert($0).inserted }
+        }()
+        if range, let anchor = selectionAnchor,
+           let anchorIndex = orderIDs.firstIndex(of: anchor),
+           let targetIndex = orderIDs.firstIndex(of: id) {
+            let bounds = anchorIndex <= targetIndex ? anchorIndex...targetIndex : targetIndex...anchorIndex
+            selection = Set(orderIDs[bounds])
+        } else if extend {
+            if selection.contains(id) {
+                selection.remove(id)
+            } else {
+                selection.insert(id)
+            }
+            selectionAnchor = id
+        } else {
+            selection = [id]
+            selectionAnchor = id
+        }
+        rebuildPlan()
+    }
+
+    /// 某一行对应的片子；点在文件上也算到它所属的那一张。
+    func asset(withID id: String) -> AssetGroup? {
+        groups.first { $0.id == id }
+    }
+
+    func selectAll() {
+        selection = Set(groups.map(\.id))
+        selectionAnchor = groups.first?.id
+        rebuildPlan()
+        statusMessage = "已选中 \(groups.count) 张"
+    }
+
+    func clearSelectionIfNeeded() -> Bool {
+        guard !selection.isEmpty else { return false }
+        selection.removeAll()
+        selectionAnchor = nil
+        rebuildPlan()
+        return true
+    }
+
+    /// 右键先规范化选中集。
+    func prepareContextAction(forAssetID id: String) {
+        guard !selection.contains(id) else { return }
+        selection = [id]
+        selectionAnchor = id
+        rebuildPlan()
+    }
+
+    var actionTargets: [AssetGroup] {
+        selection.isEmpty ? groups : groups.filter { selection.contains($0.id) }
+    }
+
+    func requestDelete() {
+        let targets = actionTargets
+        guard !targets.isEmpty else {
+            statusMessage = "先选中要删除的文件"
+            return
+        }
+        pendingDelete = targets
+    }
+
+    func cancelDelete() {
+        pendingDelete = []
+    }
+
+    func confirmDelete() {
+        let targets = pendingDelete
+        pendingDelete = []
+        guard !targets.isEmpty else { return }
+        var removed: Set<String> = []
+        var failures: [String] = []
+        for group in targets {
+            let outcome = TrashService.moveToTrash(group: group)
+            if outcome.allSucceeded {
+                removed.insert(group.id)
+            } else {
+                failures.append(contentsOf: outcome.failures.map { "\($0.url.lastPathComponent)：\($0.message)" })
+            }
+        }
+        if !removed.isEmpty {
+            groups.removeAll { removed.contains($0.id) }
+            selection.subtract(removed)
+            rebuildPlan()
+            statusMessage = "已把 \(removed.count) 张移入废纸篓"
+        }
+        if !failures.isEmpty {
+            errorMessage = failures.prefix(6).joined(separator: "\n")
+        }
+    }
+
+    func rotate(clockwise: Bool) {
+        let targets = actionTargets
+        guard !targets.isEmpty else {
+            statusMessage = "先选中要旋转的文件"
+            return
+        }
+        var updated = 0
+        var skipped = 0
+        var errors: [String] = []
+        for group in targets {
+            let outcome = RotateService.rotate(group, clockwise: clockwise)
+            updated += outcome.updatedFiles.count + outcome.updatedSidecars.count
+            skipped += outcome.skipped.count
+            errors.append(contentsOf: outcome.errors)
+        }
+        if !errors.isEmpty {
+            errorMessage = errors.prefix(6).joined(separator: "\n")
+        } else if updated == 0 {
+            statusMessage = "没有可旋转的文件（\(skipped) 个格式不支持）"
+        } else {
+            statusMessage = "已\(clockwise ? "向右" : "向左")旋转 \(targets.count) 张（跳过 \(skipped) 个文件）"
+        }
+        // 缩略图与预览按修改时间自动失效，这里只刷新列表
+        refresh(folder: folder)
+    }
+
+    func revealSelection() {
+        FileActions.reveal(actionTargets.flatMap { $0.files.map(\.url) })
+    }
+
+    func showInfoForSelection() {
+        let urls = actionTargets.flatMap { $0.files.map(\.url) }
+        if !FileActions.showInfo(urls) {
+            FileActions.reveal(urls)
+            statusMessage = "无法打开访达的简介窗口，已改为在访达中显示"
+        }
+    }
+
     func handle(_ action: ShortcutAction) -> Bool {
         switch action {
         case .undo:
@@ -337,6 +527,14 @@ final class RenameState: ObservableObject {
         case .previousDateGroup:
             guard viewMode == .columns else { return false }
             moveHighlight(by: -1)
+        case .rotateLeft:
+            rotate(clockwise: false)
+        case .rotateRight:
+            rotate(clockwise: true)
+        case .selectAll:
+            selectAll()
+        case .showInfo:
+            showInfoForSelection()
         case .toggleFolderPanel:
             // 改名模块没有独立的文件夹栏
             return false
@@ -353,6 +551,7 @@ final class RenameState: ObservableObject {
 
     func apply() {
         guard let folder else { return }
+        let plan = pendingPlan
         guard !plan.operations.isEmpty else {
             statusMessage = "没有需要改名的文件"
             return
@@ -367,6 +566,7 @@ final class RenameState: ObservableObject {
     /// 冲突对话框：跳过冲突项，其余照常改。
     func applySkippingConflicts() {
         pendingConflicts = []
+        let plan = pendingPlan
         let skipping = Set(plan.conflicts.map { $0.source.standardizedFileURL })
         run(plan: plan, skipping: skipping, replacing: [])
     }
@@ -374,6 +574,7 @@ final class RenameState: ObservableObject {
     /// 冲突对话框：把已存在的目标文件移进废纸篓后覆盖。
     func applyReplacingConflicts() {
         pendingConflicts = []
+        let plan = pendingPlan
         let replacing = Set(plan.conflicts.map { $0.target.standardizedFileURL })
         run(plan: plan, skipping: [], replacing: replacing)
     }

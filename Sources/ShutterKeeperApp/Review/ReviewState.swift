@@ -20,7 +20,11 @@ final class ReviewState: ObservableObject {
     }
     @Published var statusMessage: String?
     @Published var errorMessage: String?
-    @Published var deleteTarget: AssetGroup?
+    /// 等待确认删除的片子（多选时为多张）。
+    @Published var pendingDelete: [AssetGroup] = []
+    /// 多选中的片子 id（不含「当前预览」这一概念，当前预览另有 currentID）。
+    @Published private(set) var selection: Set<String> = []
+    private var selectionAnchor: String?
     /// 0…1，1 表示已放大到 1:1 像素。
     @Published private(set) var zoomProgress: CGFloat = 0
     @Published var exifPanelVisible = true
@@ -288,22 +292,145 @@ final class ReviewState: ObservableObject {
 
     // MARK: - 删除
 
+    /// 多选中的片子；没有多选时返回当前这张。
+    var actionTargets: [AssetGroup] {
+        let selected = session.visibleGroups.filter { selection.contains($0.id) }
+        if !selected.isEmpty { return selected }
+        return [session.current].compactMap { $0 }
+    }
+
+    var selectionCount: Int { selection.count }
+
     func requestDelete() {
-        guard let group = session.current else { return }
-        deleteTarget = group
+        let targets = actionTargets
+        guard !targets.isEmpty else { return }
+        pendingDelete = targets
     }
 
     func confirmDelete() {
-        guard let group = deleteTarget else { return }
-        deleteTarget = nil
-        let outcome = TrashService.moveToTrash(group: group)
-        if outcome.allSucceeded {
-            session.removeCurrent()
+        let targets = pendingDelete
+        pendingDelete = []
+        guard !targets.isEmpty else { return }
+        var removedIDs: Set<String> = []
+        var failures: [String] = []
+        for group in targets {
+            let outcome = TrashService.moveToTrash(group: group)
+            if outcome.allSucceeded {
+                removedIDs.insert(group.id)
+            } else {
+                failures.append(contentsOf: outcome.failures.map { "\($0.url.lastPathComponent)：\($0.message)" })
+            }
+        }
+        if !removedIDs.isEmpty {
+            session.remove(ids: removedIDs)
+            selection.subtract(removedIDs)
             syncCurrent()
-            showStatus("已移入废纸篓：\(group.displayName)")
+            showStatus("已把 \(removedIDs.count) 张移入废纸篓")
+        }
+        if !failures.isEmpty {
+            errorMessage = "删除未完成\n" + failures.prefix(6).joined(separator: "\n")
+        }
+    }
+
+    func cancelDelete() {
+        pendingDelete = []
+    }
+
+    // MARK: - 多选
+
+    func select(_ id: String, extend: Bool, range: Bool) {
+        if range, let anchor = selectionAnchor,
+           let anchorIndex = session.visibleGroups.firstIndex(where: { $0.id == anchor }),
+           let targetIndex = session.visibleGroups.firstIndex(where: { $0.id == id }) {
+            let bounds = anchorIndex <= targetIndex ? anchorIndex...targetIndex : targetIndex...anchorIndex
+            selection = Set(session.visibleGroups[bounds].map(\.id))
+        } else if extend {
+            if selection.contains(id) {
+                selection.remove(id)
+            } else {
+                selection.insert(id)
+            }
+            selectionAnchor = id
         } else {
-            let detail = outcome.failures.map { "\($0.url.lastPathComponent)：\($0.message)" }.joined(separator: "\n")
-            errorMessage = "删除未完成\n\(detail)"
+            selection = [id]
+            selectionAnchor = id
+        }
+        select(id: id)
+    }
+
+    func selectAllVisible() {
+        let ids = session.visibleGroups.map(\.id)
+        selection = Set(ids)
+        selectionAnchor = ids.first
+        showStatus("已选中 \(ids.count) 张")
+    }
+
+    func clearSelection() {
+        selection.removeAll()
+        selectionAnchor = nil
+    }
+
+    /// Esc：有选中就先取消选中，返回 true 表示这次按键被消费了。
+    func clearSelectionIfNeeded() -> Bool {
+        guard !selection.isEmpty else { return false }
+        clearSelection()
+        return true
+    }
+
+    func isSelected(_ group: AssetGroup) -> Bool {
+        selection.contains(group.id)
+    }
+
+    // MARK: - 旋转（非破坏性）
+
+    func rotate(clockwise: Bool) {
+        let targets = actionTargets
+        guard !targets.isEmpty else { return }
+        var updated = 0
+        var skippedReasons: [String] = []
+        var errors: [String] = []
+        for group in targets {
+            let outcome = RotateService.rotate(group, clockwise: clockwise)
+            updated += outcome.updatedFiles.count + outcome.updatedSidecars.count
+            skippedReasons.append(contentsOf: outcome.skipped.map { "\($0.url.lastPathComponent)：\($0.reason)" })
+            errors.append(contentsOf: outcome.errors)
+        }
+        // 缩略图缓存按修改时间区分，会自然失效；内存里的预览要清掉重载
+        preview = nil
+        Task { [loader] in await loader.clear() }
+        loadPreview()
+        if !errors.isEmpty {
+            errorMessage = errors.prefix(6).joined(separator: "\n")
+        } else if updated == 0, let first = skippedReasons.first {
+            showStatus("没有可旋转的文件：\(first)")
+        } else {
+            var message = "已\(clockwise ? "向右" : "向左")旋转 \(targets.count) 张"
+            if !skippedReasons.isEmpty { message += "（跳过 \(skippedReasons.count) 个文件）" }
+            showStatus(message)
+        }
+    }
+
+    // MARK: - 右键菜单动作
+
+    /// 右键某个缩略图：如果它不在选中集里，先把它选上，再执行动作。
+    func prepareContextAction(for group: AssetGroup) {
+        if !selection.contains(group.id) {
+            selection = [group.id]
+            selectionAnchor = group.id
+            select(id: group.id)
+        }
+    }
+
+    func revealSelection() {
+        let urls = actionTargets.flatMap { $0.files.map(\.url) }
+        FileActions.reveal(urls)
+    }
+
+    func showInfoForSelection() {
+        let urls = actionTargets.flatMap { $0.files.map(\.url) }
+        if !FileActions.showInfo(urls) {
+            FileActions.reveal(urls)
+            showStatus("无法打开访达的简介窗口（可能需要在系统设置里允许控制访达），已改为在访达中显示")
         }
     }
 
@@ -397,6 +524,14 @@ final class ReviewState: ObservableObject {
             onOpenFolder?(parent)
         case .toggleFolderPanel:
             folderPanelVisible.toggle()
+        case .rotateLeft:
+            rotate(clockwise: false)
+        case .rotateRight:
+            rotate(clockwise: true)
+        case .selectAll:
+            selectAllVisible()
+        case .showInfo:
+            showInfoForSelection()
         case .undo, .iconView, .columnView:
             // 这几个是改名模块的快捷键
             return false

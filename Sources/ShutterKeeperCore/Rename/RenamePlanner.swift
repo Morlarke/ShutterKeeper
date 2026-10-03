@@ -43,13 +43,20 @@ public enum RenamePlanner {
                     let target = file.directory
                         .appendingPathComponent(newBase)
                         .appendingPathExtension(file.url.pathExtension)
-                    append(operationFrom: file.url, to: target, into: &operations, unchanged: &unchanged)
+                    append(
+                        operationFrom: file.url,
+                        to: target,
+                        assetID: group.id,
+                        into: &operations,
+                        unchanged: &unchanged
+                    )
                     filePreviews.append(
                         RenameFilePreview(
                             originalURL: file.url,
                             newName: target.lastPathComponent,
                             kind: file.kind,
-                            isSidecar: false
+                            isSidecar: false,
+                            assetID: group.id
                         )
                     )
                 }
@@ -58,13 +65,20 @@ public enum RenamePlanner {
                     let target = sidecar.url.deletingLastPathComponent()
                         .appendingPathComponent(newBase)
                         .appendingPathExtension(extensionName)
-                    append(operationFrom: sidecar.url, to: target, into: &operations, unchanged: &unchanged)
+                    append(
+                        operationFrom: sidecar.url,
+                        to: target,
+                        assetID: group.id,
+                        into: &operations,
+                        unchanged: &unchanged
+                    )
                     filePreviews.append(
                         RenameFilePreview(
                             originalURL: sidecar.url,
                             newName: target.lastPathComponent,
                             kind: .other,
-                            isSidecar: true
+                            isSidecar: true,
+                            assetID: group.id
                         )
                     )
                 }
@@ -188,10 +202,11 @@ public enum RenamePlanner {
     static func append(
         operationFrom source: URL,
         to target: URL,
+        assetID: String,
         into operations: inout [RenameOperation],
         unchanged: inout Int
     ) {
-        let operation = RenameOperation(originalURL: source, finalURL: target)
+        let operation = RenameOperation(originalURL: source, finalURL: target, assetID: assetID)
         if operation.isNoop {
             unchanged += 1
             return

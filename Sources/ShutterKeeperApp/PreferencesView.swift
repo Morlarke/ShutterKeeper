@@ -378,7 +378,7 @@ struct PreferencesView: View {
 /// 从 bundle 里读版本与作者信息（用 `swift run` 直接跑时给出兜底值）。
 enum AppInfo {
     static var version: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "beta0.1"
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "beta-0.11"
     }
 
     static var author: String {
