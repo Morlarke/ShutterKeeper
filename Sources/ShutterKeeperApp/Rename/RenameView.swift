@@ -3,9 +3,9 @@ import SwiftUI
 
 /// 批量改名模块。
 ///
-/// 从上到下三层：功能条 → 改名控制区（示例、统一填写、每组文本、开始改名）→ 素材浏览区。
-/// 浏览区用访达的视图模式：**⌘2 分栏视图**（默认）和 **⌘1 图标视图**，
-/// 两种视图都直接作用在当前文件夹上，不再单开一栏文件夹列表。
+/// 浏览区就是访达式的图标 / 分栏视图；改名的参数放在弹窗里：
+/// **选中文件 → 点「批量改名…」→ 在弹窗里选格式 → 确认**。
+/// 不选任何文件时，弹窗默认处理整个文件夹。
 struct RenameView: View {
     @ObservedObject var rename: RenameState
     let theme: AppTheme
@@ -13,7 +13,8 @@ struct RenameView: View {
     @EnvironmentObject private var state: AppState
     @AppStorage(PrefKey.dateFormat) private var dateFormatRaw = DateFormatOption.compact.rawValue
     @AppStorage(PrefKey.sequenceDigits) private var sequenceDigits = 3
-    @FocusState private var focusedField: String?
+
+    @State private var showingSheet = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -22,14 +23,10 @@ struct RenameView: View {
             if rename.folder == nil {
                 emptyState
             } else {
-                controlBand
-                separator
                 RenameBrowserView(rename: rename, cache: state.thumbnailCache, theme: theme)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    // 点浏览区就结束文字输入，方向键才会回到「切换文件夹」上
-                    .simultaneousGesture(
-                        TapGesture().onEnded { focusedField = nil }
-                    )
+                separator
+                actionBar
             }
         }
         .onAppear {
@@ -38,6 +35,12 @@ struct RenameView: View {
                 $0.sequenceDigits = sequenceDigits
             }
             rename.openDefaultFolderIfNeeded(lastUsed: state.defaultRenameFolder)
+        }
+        .sheet(isPresented: $showingSheet) {
+            RenameSheet(rename: rename, theme: theme, dateFormat: $dateFormatRaw, sequenceDigits: $sequenceDigits) {
+                showingSheet = false
+                rename.apply()
+            }
         }
         .alert(
             "有 \(rename.pendingConflicts.count) 个目标文件名已存在",
@@ -95,7 +98,7 @@ struct RenameView: View {
         return lines.joined(separator: "\n")
     }
 
-    // MARK: - 功能条
+    // MARK: - 顶部功能条
 
     private var toolbar: some View {
         HStack(spacing: 10) {
@@ -104,7 +107,7 @@ struct RenameView: View {
                     rename.open(folder: parent)
                 }
             } label: {
-                Image(systemName: "arrow.up")
+                Image(systemName: "chevron.up")
             }
             .controlSize(.small)
             .help("上一级（⌥⌘↑）")
@@ -113,7 +116,7 @@ struct RenameView: View {
             Button {
                 rename.chooseFolder()
             } label: {
-                Image(systemName: "folder.badge.plus")
+                Image(systemName: "folder")
             }
             .controlSize(.small)
             .help("打开其它文件夹")
@@ -124,17 +127,19 @@ struct RenameView: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Text(folder.deletingLastPathComponent().path)
-                    .font(.system(size: 10.5))
+                    .font(.system(size: 11))
                     .foregroundStyle(theme.secondaryText)
                     .lineLimit(1)
                     .truncationMode(.head)
-                    .frame(maxWidth: 240, alignment: .leading)
+                    .frame(maxWidth: 260, alignment: .leading)
+
                 Button {
                     rename.refresh()
                 } label: {
                     Image(systemName: "arrow.clockwise")
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.borderless)
+                .controlSize(.small)
                 .help("重新扫描")
             }
 
@@ -142,226 +147,185 @@ struct RenameView: View {
 
             viewModePicker
 
-            if rename.isWorking || rename.isScanning {
+            if rename.isScanning {
                 ProgressView().controlSize(.small)
-            }
-            if let status = rename.statusMessage {
-                Text(status)
-                    .font(.system(size: 11))
-                    .foregroundStyle(theme.secondaryText)
             }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
+        .background(.bar)
     }
 
     private var viewModePicker: some View {
-        HStack(spacing: 4) {
+        Picker("", selection: $rename.viewMode) {
             ForEach(RenameViewMode.allCases) { mode in
-                let isSelected = rename.viewMode == mode
-                Button {
-                    rename.viewMode = mode
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: mode.systemImage)
-                            .font(.system(size: 11))
-                        Text(mode.title)
-                            .font(.system(size: 11.5, weight: isSelected ? .semibold : .regular))
-                    }
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 4)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .fill(isSelected ? Color.accentColor.opacity(0.85) : Color.clear)
-                    )
-                    .foregroundStyle(isSelected ? Color.white : theme.secondaryText)
-                }
-                .buttonStyle(.plain)
-                .help("\(mode.title)（\(mode == .icons ? "⌘1" : "⌘2")）")
+                Label(mode.title, systemImage: mode.systemImage).tag(mode)
             }
         }
-        .padding(3)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(theme.panelBackground)
-        )
-        .fixedSize()
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .frame(width: 210)
+        .help("⌘1 图标视图 / ⌘2 分栏视图")
+    }
+
+    // MARK: - 底部动作条
+
+    private var actionBar: some View {
+        HStack(spacing: 12) {
+            if rename.isRenamingSubset {
+                Label("已选 \(rename.selection.count) 张", systemImage: "checkmark.circle.fill")
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(Color.accentColor)
+                Button("取消选择") { _ = rename.clearSelectionIfNeeded() }
+                    .controlSize(.small)
+            } else {
+                Text("共 \(rename.groups.count) 张 · 不选则整个文件夹都改")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(theme.secondaryText)
+            }
+
+            Spacer()
+
+            if rename.isWorking {
+                ProgressView().controlSize(.small)
+            }
+            if let status = rename.statusMessage {
+                Text(status)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(theme.secondaryText)
+                    .lineLimit(1)
+            }
+
+            Button {
+                rename.rebuildPlan()
+                showingSheet = true
+            } label: {
+                Label("批量改名…", systemImage: "pencil")
+            }
+            .controlSize(.large)
+            .keyboardShortcut("r", modifiers: [.command, .shift])
+            .disabled(!rename.canApply)
+
+            if rename.canUndo {
+                Button("撤销") { rename.undoLastRename() }
+                    .controlSize(.large)
+                    .help("撤销上一次改名（⌘Z）")
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(.bar)
     }
 
     private var emptyState: some View {
         VStack(spacing: 12) {
             Image(systemName: "pencil")
-                .font(.system(size: 28))
+                .font(.system(size: 30))
                 .foregroundStyle(theme.secondaryText)
             Text("先选一个文件夹")
-                .font(.system(size: 13, weight: .medium))
-            Text("模板：日期_自定义文本_序列号，例如 20260927_婚礼_001.CR3\n按拍摄日期分组，同组共用一个文本；RAW + JPG 共用同一个主文件名；视频单独一套序列号。")
-                .font(.system(size: 11.5))
+                .font(.system(size: 14, weight: .medium))
+            Text("选中要改名的文件，点右下角「批量改名…」；不选就处理整个文件夹。")
+                .font(.system(size: 12))
                 .foregroundStyle(theme.secondaryText)
-                .multilineTextAlignment(.center)
             Button("打开文件夹…") { rename.chooseFolder() }
                 .controlSize(.large)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
+}
 
-    // MARK: - 改名控制区（固定在浏览区上方）
+// MARK: - 改名设置弹窗
 
-    private var controlBand: some View {
-        HStack(alignment: .top, spacing: 16) {
-            groupColumn
-                .frame(maxWidth: .infinity, alignment: .leading)
+struct RenameSheet: View {
+    @ObservedObject var rename: RenameState
+    let theme: AppTheme
+    @Binding var dateFormat: String
+    @Binding var sequenceDigits: Int
+    let onConfirm: () -> Void
 
-            Rectangle().fill(theme.separator).frame(width: 1, height: 92)
+    @Environment(\.dismiss) private var dismiss
 
-            summaryColumn
-                .frame(width: 300, alignment: .leading)
-        }
-        .padding(12)
-        .background(theme.panelBackground.opacity(0.25))
-    }
-
-    private var summaryColumn: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            SectionTitle(text: "模板示例", theme: theme)
-            Text(rename.example ?? "—")
-                .font(.system(size: 15, weight: .semibold, design: .monospaced))
-                .textSelection(.enabled)
-                .lineLimit(1)
-                .minimumScaleFactor(0.65)
-
+    var body: some View {
+        VStack(spacing: 0) {
             HStack(spacing: 10) {
-                miniStat(rename.isRenamingSubset ? "选中" : "片子", "\(rename.isRenamingSubset ? rename.selection.count : rename.groups.count)")
-                miniStat("要改名", "\(rename.pendingFileCount)")
-                miniStat("不变", "\(rename.pendingUnchangedCount)")
-                if rename.conflictCount > 0 {
-                    miniStat("重名", "\(rename.conflictCount)", warning: true)
-                }
-            }
-
-            HStack(spacing: 10) {
-                Button {
-                    rename.apply()
-                } label: {
-                    Text("开始改名")
-                        .frame(maxWidth: 140)
-                }
-                .controlSize(.large)
-                .disabled(!rename.canApply)
-
-                Text(rename.canUndo ? "⌘Z 撤销（\(rename.lastOperations.count) 个文件）" : "⌘Z 撤销")
-                    .font(.system(size: 10.5))
-                    .foregroundStyle(rename.canUndo ? theme.primaryText : theme.secondaryText)
-            }
-        }
-    }
-
-    private func miniStat(_ label: String, _ value: String, warning: Bool = false) -> some View {
-        HStack(spacing: 3) {
-            Text(value)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(warning ? Color.orange : theme.primaryText)
-            Text(label)
-                .font(.system(size: 10.5))
-                .foregroundStyle(theme.secondaryText)
-        }
-    }
-
-    private var groupColumn: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                SectionTitle(text: "按拍摄日期分组", theme: theme)
-
-                if rename.isRenamingSubset {
-                    HStack(spacing: 5) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 10))
-                        Text("只改选中的 \(rename.selection.count) 张")
-                            .font(.system(size: 11, weight: .medium))
-                        Button("取消选择") { _ = rename.clearSelectionIfNeeded() }
-                            .controlSize(.mini)
-                    }
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
-                    .background(Capsule().fill(Color.accentColor.opacity(0.22)))
-                }
-
-                Text("统一填写")
-                    .font(.system(size: 11))
+                Image(systemName: "pencil")
+                    .font(.system(size: 15, weight: .semibold))
+                Text("批量改名")
+                    .font(.system(size: 15, weight: .semibold))
+                Spacer()
+                Text(rename.isRenamingSubset ? "处理选中的 \(rename.selection.count) 张" : "处理整个文件夹（\(rename.groups.count) 张）")
+                    .font(.system(size: 11.5))
                     .foregroundStyle(theme.secondaryText)
-
-                ForEach(0..<rename.segmentCount, id: \.self) { index in
-                    TextField("文本\(index + 1)", text: Binding(
-                        get: { index < rename.bulkSegments.count ? rename.bulkSegments[index] : "" },
-                        set: { newValue in
-                            while rename.bulkSegments.count <= index {
-                                rename.bulkSegments.append("")
-                            }
-                            rename.bulkSegments[index] = newValue
-                        }
-                    ))
-                        .textFieldStyle(.roundedBorder)
-                        .frame(minWidth: 86, idealWidth: index == 0 ? 120 : 100, maxWidth: 150)
-                        .focused($focusedField, equals: "bulk#\(index)")
-                }
-
-                Button {
-                    rename.addSegment()
-                } label: {
-                    Image(systemName: "plus")
-                }
-                .controlSize(.small)
-                .help("增加一个自定义文本（最多 4 段，例如 婚礼_新娘_精修）")
-                .disabled(rename.segmentCount >= 4)
-
-                Button {
-                    rename.removeSegment()
-                } label: {
-                    Image(systemName: "minus")
-                }
-                .controlSize(.small)
-                .help("减少一个自定义文本")
-                .disabled(rename.segmentCount <= 1)
-
-                Button("应用到全部") { rename.applyBulkSegments() }
-                    .controlSize(.small)
-                    .disabled(rename.buckets.isEmpty)
-
-                Rectangle().fill(theme.separator).frame(width: 1, height: 18)
-
-                Picker("", selection: $dateFormatRaw) {
-                    ForEach(DateFormatOption.allCases) { option in
-                        Text(option.displayName).tag(option.rawValue)
-                    }
-                }
-                .labelsHidden()
-                .frame(width: 126)
-                .help("日期格式")
-                .onChange(of: dateFormatRaw) { _, newValue in
-                    rename.updateSettings { $0.dateFormat = newValue }
-                }
-
-                Picker("", selection: $sequenceDigits) {
-                    ForEach(1...6, id: \.self) { digits in
-                        Text("\(digits) 位序号").tag(digits)
-                    }
-                }
-                .labelsHidden()
-                .frame(width: 98)
-                .help("序列号位数")
-                .onChange(of: sequenceDigits) { _, newValue in
-                    rename.updateSettings { $0.sequenceDigits = newValue }
-                }
-
             }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 14)
+            .background(.bar)
 
-            ScrollView {
-                LazyVStack(spacing: 5) {
+            Divider()
+
+            Form {
+                Section("命名格式") {
+                    Picker("日期格式", selection: $dateFormat) {
+                        ForEach(DateFormatOption.allCases) { option in
+                            Text(option.displayName).tag(option.rawValue)
+                        }
+                    }
+                    .onChange(of: dateFormat) { _, newValue in
+                        rename.updateSettings { $0.dateFormat = newValue }
+                    }
+
+                    Picker("序列号位数", selection: $sequenceDigits) {
+                        ForEach(1...6, id: \.self) { digits in
+                            Text("\(digits) 位").tag(digits)
+                        }
+                    }
+                    .onChange(of: sequenceDigits) { _, newValue in
+                        rename.updateSettings { $0.sequenceDigits = newValue }
+                    }
+
+                    LabeledContent("模板示例") {
+                        Text(rename.example ?? "—")
+                            .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                            .textSelection(.enabled)
+                    }
+                }
+
+                Section("自定义文本（可多段）") {
+                    HStack(spacing: 8) {
+                        ForEach(0..<rename.segmentCount, id: \.self) { index in
+                            TextField("文本\(index + 1)", text: Binding(
+                                get: { index < rename.bulkSegments.count ? rename.bulkSegments[index] : "" },
+                                set: { newValue in
+                                    while rename.bulkSegments.count <= index {
+                                        rename.bulkSegments.append("")
+                                    }
+                                    rename.bulkSegments[index] = newValue
+                                }
+                            ))
+                            .textFieldStyle(.roundedBorder)
+                        }
+                        Button {
+                            rename.addSegment()
+                        } label: {
+                            Image(systemName: "plus")
+                        }
+                        .help("增加一段（例如 婚礼_新娘_精修）")
+                        .disabled(rename.segmentCount >= 4)
+                        Button {
+                            rename.removeSegment()
+                        } label: {
+                            Image(systemName: "minus")
+                        }
+                        .disabled(rename.segmentCount <= 1)
+                        Button("应用到全部") { rename.applyBulkSegments() }
+                            .disabled(rename.buckets.isEmpty)
+                    }
+                }
+
+                Section("按拍摄日期分组（每组一行，可分别填写）") {
                     if rename.buckets.isEmpty {
                         Text("这个文件夹里没有可改名的素材")
-                            .font(.system(size: 11.5))
                             .foregroundStyle(theme.secondaryText)
-                            .padding(.vertical, 6)
                     } else {
                         ForEach(rename.buckets) { bucket in
                             bucketRow(bucket)
@@ -369,28 +333,37 @@ struct RenameView: View {
                     }
                 }
             }
-            // 高度跟着分组数量走，最多约两行半，剩下的留给下面的素材区
-            .frame(height: min(CGFloat(max(rename.buckets.count, 1)) * 42 + 8, 104))
+            .formStyle(.grouped)
+
+            Divider()
+
+            HStack(spacing: 12) {
+                Text("共 \(rename.pendingFileCount) 个文件要改名")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(theme.secondaryText)
+                Spacer()
+                Button("取消") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button("开始改名") { onConfirm() }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(rename.pendingOperations.isEmpty)
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 12)
+            .background(.bar)
         }
+        .frame(width: 640, height: 560)
     }
 
     private func bucketRow(_ bucket: RenameGroupPlan) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 1) {
                 Text(bucket.title)
                     .font(.system(size: 12))
                     .lineLimit(1)
-                HStack(spacing: 5) {
-                    Text("\(bucket.count) 张")
-                        .font(.system(size: 10))
-                        .foregroundStyle(theme.secondaryText)
-                    Text(bucket.familyLabel)
-                        .font(.system(size: 9.5, weight: .medium))
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
-                        .background(Capsule().fill(theme.panelBackground))
-                        .foregroundStyle(theme.secondaryText)
-                }
+                Text("\(bucket.count) 张 · \(bucket.familyLabel)")
+                    .font(.system(size: 10))
+                    .foregroundStyle(theme.secondaryText)
             }
             .frame(width: 200, alignment: .leading)
 
@@ -403,17 +376,8 @@ struct RenameView: View {
                     set: { rename.setSegment(index, value: $0, for: bucket.id) }
                 ))
                 .textFieldStyle(.roundedBorder)
-                .frame(minWidth: 96, idealWidth: 150, maxWidth: 200)
-                .focused($focusedField, equals: "\(bucket.id)#\(index)")
             }
-
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
-        .background(
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(theme.panelBackground.opacity(0.6))
-        )
     }
 }

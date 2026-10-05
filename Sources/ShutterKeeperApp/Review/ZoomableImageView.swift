@@ -306,7 +306,12 @@ final class ZoomCanvasView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         if event.clickCount == 2 {
-            resetToFit()
+            // 双击在「1:1 像素」和「适应窗口」之间切换（Lightroom / Bridge 的习惯）
+            if zoom >= 0.995 {
+                resetToFit()
+            } else {
+                apply(command: ZoomCommand(kind: .actualSize))
+            }
             return
         }
         dragOrigin = convert(event.locationInWindow, from: nil)

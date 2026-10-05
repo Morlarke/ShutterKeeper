@@ -32,7 +32,7 @@ struct ExifPanelView: View {
 
     private func fileSection(_ group: AssetGroup) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            SectionTitle(text: "文件", theme: theme)
+            panelTitle("文件", systemImage: "doc")
             if fields.contains(.fileName) {
                 row("文件名", group.displayName, monospaced: false)
             }
@@ -59,7 +59,7 @@ struct ExifPanelView: View {
 
     private func exifSection(_ group: AssetGroup) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            SectionTitle(text: "EXIF", theme: theme)
+            panelTitle("EXIF", systemImage: "camera")
             if let metadata {
                 if fields.contains(.captureDate), let text = MetadataFormatting.date(metadata.captureDate) {
                     row("拍摄时间", text)
@@ -121,5 +121,24 @@ struct ExifPanelView: View {
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
         }
+    }
+
+    /// 面板里的小标题：字号更大、颜色更实，下面带一条淡分隔线，层次更清楚。
+    private func panelTitle(_ text: String, systemImage: String) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 5) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(theme.secondaryText)
+                Text(text)
+                    .font(.system(size: 12, weight: .semibold))
+                    .tracking(0.4)
+                    .foregroundStyle(theme.primaryText)
+            }
+            Rectangle()
+                .fill(theme.separator)
+                .frame(height: 1)
+        }
+        .padding(.bottom, 2)
     }
 }

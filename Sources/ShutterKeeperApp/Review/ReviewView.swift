@@ -258,7 +258,7 @@ struct ReviewView: View {
     }
 
     private var filterBar: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
             Toggle("筛选", isOn: Binding(
                 get: { review.session.filter.isActive },
                 set: { isOn in
@@ -268,7 +268,8 @@ struct ReviewView: View {
                 }
             ))
             .toggleStyle(.checkbox)
-            .font(.system(size: 11))
+            .font(.system(size: 11.5))
+            .fixedSize()
 
             Picker("", selection: Binding(
                 get: { review.session.filter.comparison },
@@ -283,7 +284,7 @@ struct ReviewView: View {
                 }
             }
             .labelsHidden()
-            .frame(width: 108)
+            .frame(width: 118)
             .disabled(!review.session.filter.isActive)
 
             Picker("", selection: Binding(
@@ -299,12 +300,14 @@ struct ReviewView: View {
                 }
             }
             .labelsHidden()
-            .frame(width: 76)
+            .frame(width: 84)
             .disabled(!review.session.filter.isActive)
 
             Text("\(review.totalCount) 张")
                 .font(.system(size: 11))
                 .foregroundStyle(theme.secondaryText)
+                .fixedSize()
+                .frame(minWidth: 52, alignment: .trailing)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
@@ -312,6 +315,7 @@ struct ReviewView: View {
             RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .fill(theme.panelBackground)
         )
+        .fixedSize()
     }
 
     // MARK: - 预览区
