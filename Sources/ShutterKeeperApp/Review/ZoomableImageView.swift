@@ -278,6 +278,11 @@ final class ZoomCanvasView: NSView {
     }
 
     private func zoomAt(point: CGPoint, factor: CGFloat) {
+        setZoom(zoom * factor, around: point)
+    }
+
+    /// 把缩放设成指定值，并保持 `point` 处对应的画面位置不动。
+    private func setZoom(_ target: CGFloat, around point: CGPoint) {
         let oldSize = drawSize
         let oldOrigin = drawOrigin
         guard oldSize.width > 0 else { return }
@@ -286,9 +291,9 @@ final class ZoomCanvasView: NSView {
             y: (point.y - oldOrigin.y) / oldSize.height
         )
 
-        let target = min(1, max(minZoom, zoom * factor))
-        guard abs(target - zoom) > 0.0001 else { return }
-        zoom = target
+        let clamped = min(1, max(minZoom, target))
+        guard abs(clamped - zoom) > 0.0001 else { return }
+        zoom = clamped
 
         let newSize = drawSize
         let centered = CGPoint(
@@ -307,10 +312,12 @@ final class ZoomCanvasView: NSView {
     override func mouseDown(with event: NSEvent) {
         if event.clickCount == 2 {
             // 双击在「1:1 像素」和「适应窗口」之间切换（Lightroom / Bridge 的习惯）
+            // 放到 1:1 时以鼠标点的那一处为中心，方便盯住那一块看对焦
+            let point = convert(event.locationInWindow, from: nil)
             if zoom >= 0.995 {
                 resetToFit()
             } else {
-                apply(command: ZoomCommand(kind: .actualSize))
+                setZoom(1, around: point)
             }
             return
         }

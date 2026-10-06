@@ -255,36 +255,55 @@ final class ReviewState: ObservableObject {
     // MARK: - 打分
 
     func setRating(_ value: Int) {
-        guard let group = session.current else { return }
-        guard group.isRatable else {
+        // 多选时一起打分：整批都写同样的星级
+        let targets = actionTargets.filter(\.isRatable)
+        guard !targets.isEmpty else {
             showStatus("视频不打分")
             return
         }
-        session.setRating(value, for: group.id)
-        try? store?.setRating(
-            value,
-            folder: group.folder,
-            baseName: group.baseName,
-            captureDate: group.captureDate,
-            primaryPath: group.previewFile?.url.path,
-            isVideo: group.isVideo
-        )
-        showStatus("\(group.displayName) → \(value) 星")
 
-        // 筛选实时生效：打完之后如果这张不满足了，自动跳到下一张
+        for group in targets {
+            session.setRating(value, for: group.id)
+            try? store?.setRating(
+                value,
+                folder: group.folder,
+                baseName: group.baseName,
+                captureDate: group.captureDate,
+                primaryPath: group.previewFile?.url.path,
+                isVideo: group.isVideo
+            )
+        }
+        if targets.count == 1, let group = targets.first {
+            showStatus("\(group.displayName) → \(value) 星")
+        } else {
+            showStatus("已给 \(targets.count) 张打 \(value) 星")
+        }
+
+        // 筛选实时生效：打完之后如果当前这张不满足了，自动跳到下一张
         if session.filter.isActive {
             session.applyFilter(session.filter)
             syncCurrent()
         }
 
         Task.detached(priority: .userInitiated) {
-            let outcome = RatingService.write(rating: value, to: group)
+            var firstError: String?
+            var databaseOnly: Set<String> = []
+            for group in targets {
+                let outcome = RatingService.write(rating: value, to: group)
+                if firstError == nil, let message = outcome.errors.first {
+                    firstError = message
+                }
+                databaseOnly.formUnion(outcome.databaseOnlyFiles.map(\.lastPathComponent))
+            }
+            let finalError = firstError
+            let finalDatabaseOnly = databaseOnly.sorted()
             await MainActor.run {
-                if let message = outcome.errors.first {
-                    self.errorMessage = message
-                } else if !outcome.databaseOnlyFiles.isEmpty {
-                    let names = outcome.databaseOnlyFiles.map(\.lastPathComponent).joined(separator: "、")
-                    self.showStatus("\(names)：首版只记录在软件内，未写入文件")
+                if let finalError {
+                    self.errorMessage = finalError
+                } else if !finalDatabaseOnly.isEmpty, finalDatabaseOnly.count <= 3 {
+                    self.showStatus("\(finalDatabaseOnly.joined(separator: "、"))：只记录在软件内，未写入文件")
+                } else if !finalDatabaseOnly.isEmpty {
+                    self.showStatus("有 \(finalDatabaseOnly.count) 个文件只记录在软件内，未写入文件")
                 }
             }
         }

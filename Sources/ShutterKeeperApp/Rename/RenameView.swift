@@ -101,54 +101,76 @@ struct RenameView: View {
     // MARK: - 顶部功能条
 
     private var toolbar: some View {
-        HStack(spacing: 10) {
-            Button {
-                if let parent = FolderBrowserView.parent(of: rename.folder) {
-                    rename.open(folder: parent)
-                }
-            } label: {
-                Image(systemName: "chevron.up")
-            }
-            .controlSize(.small)
-            .help("上一级（⌥⌘↑）")
-            .disabled(FolderBrowserView.parent(of: rename.folder) == nil)
-
-            Button {
-                rename.chooseFolder()
-            } label: {
-                Image(systemName: "folder")
-            }
-            .controlSize(.small)
-            .help("打开其它文件夹")
-
-            if let folder = rename.folder {
-                Text(folder.lastPathComponent)
-                    .font(.system(size: 12.5, weight: .medium))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Text(folder.deletingLastPathComponent().path)
-                    .font(.system(size: 11))
-                    .foregroundStyle(theme.secondaryText)
-                    .lineLimit(1)
-                    .truncationMode(.head)
-                    .frame(maxWidth: 260, alignment: .leading)
-
-                Button {
-                    rename.refresh()
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                }
-                .buttonStyle(.borderless)
-                .controlSize(.small)
-                .help("重新扫描")
-            }
-
-            Spacer()
-
+        ZStack {
+            // 视图切换放在正中间
             viewModePicker
 
-            if rename.isScanning {
-                ProgressView().controlSize(.small)
+            HStack(spacing: 10) {
+                Button {
+                    if let parent = FolderBrowserView.parent(of: rename.folder) {
+                        rename.open(folder: parent)
+                    }
+                } label: {
+                    Image(systemName: "chevron.up")
+                }
+                .controlSize(.small)
+                .help("上一级（⌥⌘↑）")
+                .disabled(FolderBrowserView.parent(of: rename.folder) == nil)
+
+                Button {
+                    rename.chooseFolder()
+                } label: {
+                    Image(systemName: "folder")
+                }
+                .controlSize(.small)
+                .help("打开其它文件夹")
+
+                if let folder = rename.folder {
+                    Text(folder.lastPathComponent)
+                        .font(.system(size: 12.5, weight: .medium))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Text(folder.deletingLastPathComponent().path)
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.secondaryText)
+                        .lineLimit(1)
+                        .truncationMode(.head)
+                        .frame(maxWidth: 220, alignment: .leading)
+
+                    Button {
+                        rename.refresh()
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
+                    .help("重新扫描")
+                }
+
+                Spacer()
+
+                if rename.isScanning {
+                    ProgressView().controlSize(.small)
+                }
+                if let status = rename.statusMessage, !rename.isWorking {
+                    Text(status)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(theme.secondaryText)
+                        .lineLimit(1)
+                        .frame(maxWidth: 260, alignment: .trailing)
+                }
+
+                // 改名按钮放在原来视图按钮的位置（右上角）
+                Button {
+                    rename.rebuildPlan()
+                    showingSheet = true
+                } label: {
+                    Label("批量改名…", systemImage: "pencil")
+                }
+                .controlSize(.large)
+                .keyboardShortcut("r", modifiers: [.command, .shift])
+                .disabled(!rename.canApply)
+                .help("改名设置与预览（⌘⇧R）")
             }
         }
         .padding(.horizontal, 14)
@@ -189,22 +211,6 @@ struct RenameView: View {
             if rename.isWorking {
                 ProgressView().controlSize(.small)
             }
-            if let status = rename.statusMessage {
-                Text(status)
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(theme.secondaryText)
-                    .lineLimit(1)
-            }
-
-            Button {
-                rename.rebuildPlan()
-                showingSheet = true
-            } label: {
-                Label("批量改名…", systemImage: "pencil")
-            }
-            .controlSize(.large)
-            .keyboardShortcut("r", modifiers: [.command, .shift])
-            .disabled(!rename.canApply)
 
             if rename.canUndo {
                 Button("撤销") { rename.undoLastRename() }
