@@ -97,7 +97,12 @@ final class RenameState: ObservableObject {
     )
 
     var currentPlan: RenamePlan { plan }
-    var canApply: Bool { folder != nil && !pendingOperations.isEmpty && !isWorking }
+    /// 能不能打开改名弹窗：只要有文件夹、里面有素材就行
+    /// （改过一次之后文件名已经符合模板，此时计划里没有变化，但依然要能进去改设置）。
+    var canOpenSheet: Bool { folder != nil && !groups.isEmpty && !isWorking }
+
+    /// 弹窗里「开始改名」能不能点：确实有文件要改才行。
+    var canApply: Bool { canOpenSheet && !pendingOperations.isEmpty }
     var canUndo: Bool { !lastOperations.isEmpty && !isWorking }
     var example: String? { plan.example }
     var conflictCount: Int { pendingPlan.conflicts.count }

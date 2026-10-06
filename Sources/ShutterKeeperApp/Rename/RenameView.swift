@@ -169,7 +169,7 @@ struct RenameView: View {
                 }
                 .controlSize(.large)
                 .keyboardShortcut("r", modifiers: [.command, .shift])
-                .disabled(!rename.canApply)
+                .disabled(!rename.canOpenSheet)
                 .help("改名设置与预览（⌘⇧R）")
             }
         }
@@ -355,9 +355,16 @@ struct RenameSheet: View {
             Divider()
 
             HStack(spacing: 12) {
-                Text("共 \(rename.pendingFileCount) 个文件要改名")
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(theme.secondaryText)
+                if rename.pendingOperations.isEmpty {
+                    Label("当前设置下没有文件需要改名（文件名已经符合模板），改一下自定义文本或日期来源再试", systemImage: "info.circle")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(theme.secondaryText)
+                        .lineLimit(1)
+                } else {
+                    Text("共 \(rename.pendingFileCount) 个文件要改名")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(theme.secondaryText)
+                }
                 Spacer()
                 Button("取消") { dismiss() }
                     .keyboardShortcut(.cancelAction)
