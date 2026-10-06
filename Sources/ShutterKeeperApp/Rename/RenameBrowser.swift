@@ -217,8 +217,8 @@ private struct RenameFileCell: View {
 private struct RenameColumnBrowser: View {
     @ObservedObject var rename: RenameState
     let theme: AppTheme
-
-    private let columnWidth: CGFloat = 200
+    /// 拖动开始时的列宽（避免边拖边累加导致失控）
+    @State private var dragStartWidth: CGFloat?
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -226,7 +226,7 @@ private struct RenameColumnBrowser: View {
                 HStack(spacing: 0) {
                     ForEach(rename.columns, id: \.self) { directory in
                         column(for: directory)
-                        Rectangle().fill(theme.separator).frame(width: 1)
+                        columnDivider
                     }
                 }
             }
@@ -245,6 +245,29 @@ private struct RenameColumnBrowser: View {
         }
     }
 
+    /// 列之间的分隔条：拖动可以调列宽（跟访达一样），宽度会记住。
+    private var columnDivider: some View {
+        Rectangle()
+            .fill(theme.separator)
+            .frame(width: 5)
+            .contentShape(Rectangle())
+            .onHover { hovering in
+                if hovering { NSCursor.resizeLeftRight.set() } else { NSCursor.arrow.set() }
+            }
+            .gesture(
+                DragGesture(minimumDistance: 1)
+                    .onChanged { value in
+                        let base = dragStartWidth ?? rename.columnWidth
+                        if dragStartWidth == nil { dragStartWidth = base }
+                        rename.columnWidth = min(600, max(120, base + value.translation.width))
+                    }
+                    .onEnded { _ in
+                        dragStartWidth = nil
+                    }
+            )
+            .help("拖动调整列宽")
+    }
+
     @ViewBuilder
     private func column(for directory: URL) -> some View {
         let isCurrent = directory.standardizedFileURL == rename.folder?.standardizedFileURL
@@ -256,7 +279,7 @@ private struct RenameColumnBrowser: View {
             isCurrent: isCurrent,
             selectedFolderURL: nextPathElement(after: directory),
             theme: theme,
-            width: columnWidth,
+            width: rename.columnWidth,
             onSelectFolder: { url, index in
                 rename.selectFolder(url, rowIndex: index, isCurrentColumn: isCurrent)
             }

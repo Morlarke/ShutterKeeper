@@ -271,13 +271,24 @@ struct RenameSheet: View {
 
             Form {
                 Section("命名格式") {
-                    Picker("日期格式", selection: $dateFormat) {
-                        ForEach(DateFormatOption.allCases) { option in
-                            Text(option.displayName).tag(option.rawValue)
+                    Picker("日期来源", selection: $rename.dateSource) {
+                        ForEach(RenameDateSource.allCases) { source in
+                            Text(source.displayName).tag(source)
                         }
                     }
-                    .onChange(of: dateFormat) { _, newValue in
-                        rename.updateSettings { $0.dateFormat = newValue }
+
+                    if rename.dateSource == .custom {
+                        TextField("自定义日期文本（例如 202608）", text: $rename.customDateText)
+                            .textFieldStyle(.roundedBorder)
+                    } else {
+                        Picker("日期格式", selection: $dateFormat) {
+                            ForEach(DateFormatOption.allCases) { option in
+                                Text(option.displayName).tag(option.rawValue)
+                            }
+                        }
+                        .onChange(of: dateFormat) { _, newValue in
+                            rename.updateSettings { $0.dateFormat = newValue }
+                        }
                     }
 
                     Picker("序列号位数", selection: $sequenceDigits) {

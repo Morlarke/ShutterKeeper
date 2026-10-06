@@ -633,6 +633,28 @@ struct SelfTest {
         )
         check(threePlan.example == "20260927_婚礼_新娘_精修_001.NEF", "三段自定义文本：\(threePlan.example ?? "无")")
 
+        // 自定义日期：所有照片算一组（避免不同日期出现重复序号），日期段用用户填的文本
+        var customSettings = settings
+        customSettings.dateSource = .custom
+        customSettings.customDateText = "202608"
+        let customPlan = RenamePlanner.plan(
+            groups: scan.groups,
+            texts: ["custom#p": "LuckyC400", "unknown#v": "花絮"],
+            settings: customSettings
+        )
+        check(customPlan.example == "202608_LuckyC400_001.NEF", "自定义日期：\(customPlan.example ?? "无")")
+        check(
+            customPlan.renameGroups.filter { !$0.isVideo }.count == 1,
+            "自定义日期时所有照片并成一组（实际 \(customPlan.renameGroups.filter { !$0.isVideo }.count) 组）"
+        )
+        let customPhotoTargets = customPlan.operations
+            .filter { $0.finalURL.pathExtension.lowercased() != "mov" }
+            .map { $0.finalURL.lastPathComponent }
+        check(
+            !customPhotoTargets.isEmpty && Set(customPhotoTargets).count == customPhotoTargets.count,
+            "自定义日期下不会产生重名（\(Set(customPhotoTargets).count) 个不同名字 / \(customPhotoTargets.count) 个文件）"
+        )
+
         // 执行改名
         let outcome = RenameExecutor.apply(plan: plan)
         check(outcome.failures.isEmpty, "改名没有失败项")

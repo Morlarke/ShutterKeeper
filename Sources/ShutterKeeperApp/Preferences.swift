@@ -23,6 +23,8 @@ enum PrefKey {
     static let lastImportedFolder = "lastImportedFolder"
     /// 导入的目标父目录
     static let importDestinationRoot = "importDestinationRoot"
+    /// 改名模块分栏视图的列宽
+    static let renameColumnWidth = "renameColumnWidth"
 }
 
 /// 日期格式选项：导入建文件夹与批量改名共用。

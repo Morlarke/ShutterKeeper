@@ -43,6 +43,13 @@ final class RenameState: ObservableObject {
     /// 统一填写用的文本（每个文本段一个输入框）。
     @Published var bulkSegments: [String] = [""]
     @Published var settings = RenameSettings()
+    /// 日期来源与自定义日期文本（界面上直接绑定）。
+    @Published var dateSource: RenameDateSource = .captureDate {
+        didSet { rebuildPlan() }
+    }
+    @Published var customDateText = "" {
+        didSet { rebuildPlan() }
+    }
     @Published private(set) var isScanning = false
     @Published private(set) var isWorking = false
     @Published private(set) var statusMessage: String?
@@ -53,6 +60,13 @@ final class RenameState: ObservableObject {
     /// 待用户决定的冲突。
     @Published var pendingConflicts: [RenameConflict] = []
     @Published var viewMode: RenameViewMode = .columns
+    /// 分栏视图里每列的宽度（可以像访达那样拖，宽度会记住）。
+    @Published var columnWidth: CGFloat = {
+        let saved = UserDefaults.standard.double(forKey: PrefKey.renameColumnWidth)
+        return saved > 0 ? CGFloat(saved) : 190
+    }() {
+        didSet { UserDefaults.standard.set(Double(columnWidth), forKey: PrefKey.renameColumnWidth) }
+    }
 
     /// 改名（或撤销）完成后回调，用来让其它模块跟上这个文件夹。
     var onDidRename: ((URL) -> Void)?
@@ -238,6 +252,9 @@ final class RenameState: ObservableObject {
     // MARK: - 计划
 
     func rebuildPlan() {
+        // 把界面上的日期来源同步进设置
+        settings.dateSource = dateSource
+        settings.customDateText = customDateText
         // 计划永远基于整个文件夹：图标/分栏视图要显示所有文件，
         // 选中只决定「实际改哪些」（见 pendingOperations）。
         let targets = groups
@@ -360,6 +377,9 @@ final class RenameState: ObservableObject {
         var newSettings = settings
         update(&newSettings)
         settings = newSettings
+        // 反向同步：如果设置里改了日期来源，界面绑定也要跟上
+        if dateSource != newSettings.dateSource { dateSource = newSettings.dateSource }
+        if customDateText != newSettings.customDateText { customDateText = newSettings.customDateText }
         rebuildPlan()
     }
 

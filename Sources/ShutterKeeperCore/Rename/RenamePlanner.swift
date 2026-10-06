@@ -15,7 +15,7 @@ public enum RenamePlanner {
         settings: RenameSettings = RenameSettings(),
         defaultText: String = ""
     ) -> RenamePlan {
-        let buckets = makeBuckets(from: groups)
+        let buckets = makeBuckets(from: groups, dateSource: settings.dateSource)
         var operations: [RenameOperation] = []
         var conflicts: [RenameConflict] = []
         var examples: [String] = []
@@ -26,7 +26,13 @@ public enum RenamePlanner {
 
         for bucket in buckets {
             let text = sanitize(texts[bucket.id] ?? defaultText)
-            let dateText = dateString(for: bucket.date, format: settings.dateFormat)
+            let dateText: String
+            switch settings.dateSource {
+            case .captureDate:
+                dateText = dateString(for: bucket.date, format: settings.dateFormat)
+            case .custom:
+                dateText = sanitize(settings.customDateText)
+            }
             var index = 1
             for group in bucket.groups {
                 let sequence = sequenceString(index, digits: settings.sequenceDigits)
@@ -129,13 +135,20 @@ public enum RenamePlanner {
         let groups: [AssetGroup]
     }
 
-    static func makeBuckets(from groups: [AssetGroup]) -> [Bucket] {
+    static func makeBuckets(from groups: [AssetGroup], dateSource: RenameDateSource = .captureDate) -> [Bucket] {
         var order: [String] = []
         var contents: [String: [AssetGroup]] = [:]
 
         for group in groups {
             let isVideo = group.isVideo
-            let day = group.captureDate.map { ReviewSession.dayIdentifier(for: $0) } ?? "unknown"
+            // 自定义日期时，日期不再能区分分组，于是所有照片算一组（视频仍然单独一组），
+            // 否则不同日期会出现重复的序号。
+            let day: String
+            if dateSource == .custom {
+                day = "custom"
+            } else {
+                day = group.captureDate.map { ReviewSession.dayIdentifier(for: $0) } ?? "unknown"
+            }
             let key = "\(day)#\(isVideo ? "v" : "p")"
             if contents[key] == nil {
                 contents[key] = []

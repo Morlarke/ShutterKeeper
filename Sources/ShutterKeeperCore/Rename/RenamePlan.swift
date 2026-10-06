@@ -1,5 +1,22 @@
 import Foundation
 
+/// 日期那一段从哪来。
+public enum RenameDateSource: String, CaseIterable, Identifiable, Sendable {
+    /// 照片取 EXIF 拍摄日期，视频取文件创建日期（默认）
+    case captureDate
+    /// 用户自己填一段文本当日期
+    case custom
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .captureDate: return "拍摄时间（EXIF）"
+        case .custom: return "自定义时间"
+        }
+    }
+}
+
 /// 改名参数。
 public struct RenameSettings: Sendable, Equatable {
     /// 日期格式，默认与偏好设置里的默认格式一致。
@@ -8,11 +25,23 @@ public struct RenameSettings: Sendable, Equatable {
     public var sequenceDigits: Int
     /// 各段之间的连接符。
     public var separator: String
+    /// 日期来源：拍摄时间还是自定义文本。
+    public var dateSource: RenameDateSource
+    /// 自定义日期文本（`dateSource == .custom` 时生效）。
+    public var customDateText: String
 
-    public init(dateFormat: String = "yyyymmdd", sequenceDigits: Int = 3, separator: String = "_") {
+    public init(
+        dateFormat: String = "yyyymmdd",
+        sequenceDigits: Int = 3,
+        separator: String = "_",
+        dateSource: RenameDateSource = .captureDate,
+        customDateText: String = ""
+    ) {
         self.dateFormat = dateFormat
         self.sequenceDigits = max(1, min(6, sequenceDigits))
         self.separator = separator
+        self.dateSource = dateSource
+        self.customDateText = customDateText
     }
 }
 
