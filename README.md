@@ -51,6 +51,7 @@ swift run skctl selftest        # 完整自检，51 项检查
 > 应用**未启用 App Sandbox**（和 Bridge 一样），这样才能自由读写 SD 卡、任意文件夹和废纸篓。
 
 想把它发布到 GitHub，见 [PUBLISH.md](PUBLISH.md)（含一键脚本与协议选择）。
+项目当前状态、代码地图与关键设计决策汇总在 [PROJECT_STATE.md](PROJECT_STATE.md)。
 
 ---
 
