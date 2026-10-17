@@ -14,12 +14,24 @@ public struct AssetGroup: Identifiable, Hashable, Codable, Sendable {
     public var captureDate: Date?
     /// 分组的排序键（拍摄时间优先，其次文件名）。
     public var sortKey: String
+    /// 与这张片子配套的附属文件（`.xmp` / `.aae` 等）。
+    ///
+    /// 由扫描器一次性建立映射后填入；**不要在这里现列目录**——
+    /// 导入上千张图时每组列一次目录会把界面卡死。
+    public var sidecars: [FileRef]
 
-    public init(folder: URL, baseName: String, files: [FileRef], captureDate: Date? = nil) {
+    public init(
+        folder: URL,
+        baseName: String,
+        files: [FileRef],
+        captureDate: Date? = nil,
+        sidecars: [FileRef] = []
+    ) {
         self.folder = folder
         self.baseName = baseName
         self.files = files
         self.captureDate = captureDate
+        self.sidecars = sidecars
         self.id = AssetGroup.makeID(folder: folder, baseName: baseName)
         self.sortKey = AssetGroup.makeSortKey(captureDate: captureDate, baseName: baseName)
     }
@@ -78,29 +90,12 @@ public struct AssetGroup: Identifiable, Hashable, Codable, Sendable {
 
     /// 删除时一并处理的文件：配对成员 + 相应 `.xmp` 附属文件。
     public var deletionTargets: [FileRef] {
-        var result = files
+        var result = files + sidecars
         for file in files where file.kind == .proprietaryRAW || file.kind == .dng {
             let sidecar = FileRef(url: file.sidecarURL, kind: .other)
-            if sidecar.exists() { result.append(sidecar) }
-        }
-        return result
-    }
-
-    /// 同一文件夹里跟这张片子配套的附属文件（`.xmp` / `.aae` 等）。
-    ///
-    /// 兼容 `IMG_1234.xmp` 与 `IMG_1234.NEF.xmp` 两种命名。
-    public var sidecars: [FileRef] {
-        let fileManager = FileManager.default
-        let contents = (try? fileManager.contentsOfDirectory(atPath: folder.path)) ?? []
-        let basenames = Set(files.map { $0.baseName.lowercased() })
-        let fullnames = Set(files.map { $0.fileName.lowercased() })
-        var result: [FileRef] = []
-        for name in contents {
-            let url = folder.appendingPathComponent(name)
-            guard MediaTypes.isSidecarFile(url.pathExtension) else { continue }
-            let stem = url.deletingPathExtension().lastPathComponent.lowercased()
-            guard basenames.contains(stem) || fullnames.contains(stem) else { continue }
-            result.append(FileRef(url: url, kind: .other))
+            if sidecar.exists(), !result.contains(where: { $0.url.standardizedFileURL == sidecar.url.standardizedFileURL }) {
+                result.append(sidecar)
+            }
         }
         return result
     }

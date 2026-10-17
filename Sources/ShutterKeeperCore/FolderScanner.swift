@@ -36,6 +36,7 @@ public enum FolderScanner {
     ) throws -> FolderScanResult {
         let fileManager = FileManager.default
         var files: [FileRef] = []
+        var sidecarFiles: [FileRef] = []
         var ignored: [URL] = []
 
         let keys: [URLResourceKey] = [
@@ -63,6 +64,12 @@ public enum FolderScanner {
             if values?.isHidden == true { continue }
 
             let ext = url.pathExtension.lowercased()
+            // 附属文件不算素材，但要收集起来挂到对应的片子上
+            if MediaTypes.isSidecarFile(ext) {
+                ignored.append(url)
+                sidecarFiles.append(FileRef(url: url, kind: .other))
+                continue
+            }
             guard !ignoredExtensions.contains(ext) else {
                 ignored.append(url)
                 continue
@@ -83,7 +90,7 @@ public enum FolderScanner {
             )
         }
 
-        var groups = Pairing.group(files)
+        var groups = Pairing.attachSidecars(Pairing.group(files), allFiles: files + sidecarFiles)
 
         if readMetadata {
             for index in groups.indices {

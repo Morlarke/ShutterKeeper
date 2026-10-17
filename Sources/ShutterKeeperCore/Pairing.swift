@@ -50,6 +50,35 @@ public enum Pairing {
         return groups.sorted { $0.sortKey < $1.sortKey }
     }
 
+    /// 把同目录的附属文件挂到各张片子上。
+    ///
+    /// 只遍历一遍传入的文件列表（一次建索引），不会为每张片子再列一次目录。
+    /// 兼容 `IMG_1234.xmp` 与 `IMG_1234.NEF.xmp` 两种命名。
+    public static func attachSidecars(_ groups: [AssetGroup], allFiles: [FileRef]) -> [AssetGroup] {
+        guard !groups.isEmpty else { return groups }
+        // 目录 → （小写词干 → 附属文件）
+        var index: [String: [String: [FileRef]]] = [:]
+        for file in allFiles where MediaTypes.isSidecarFile(file.fileExtension) {
+            let folderKey = file.directory.standardizedFileURL.path
+            let stem = file.url.deletingPathExtension().lastPathComponent.lowercased()
+            index[folderKey, default: [:]][stem, default: []].append(file)
+        }
+        guard !index.isEmpty else { return groups }
+
+        return groups.map { group in
+            guard let stems = index[group.folder.standardizedFileURL.path] else { return group }
+            var matched: [FileRef] = []
+            for file in group.files {
+                matched.append(contentsOf: stems[file.baseName.lowercased()] ?? [])
+                matched.append(contentsOf: stems[file.fileName.lowercased()] ?? [])
+            }
+            guard !matched.isEmpty else { return group }
+            var copy = group
+            copy.sidecars = Array(Set(matched)).sorted { $0.fileName < $1.fileName }
+            return copy
+        }
+    }
+
     private static func kindRank(_ kind: MediaKind) -> Int {
         switch kind {
         case .jpeg: return 0

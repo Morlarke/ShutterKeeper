@@ -9,8 +9,6 @@ struct ImportView: View {
     let theme: AppTheme
 
     @EnvironmentObject private var state: AppState
-    @State private var previewLimit = 240
-
     var body: some View {
         VStack(spacing: 0) {
             sourceBar
@@ -143,8 +141,21 @@ struct ImportView: View {
 
             Spacer()
 
-            if importer.isScanning {
-                ProgressView().controlSize(.small)
+            if let scan = importer.scanState {
+                HStack(spacing: 8) {
+                    if let fraction = scan.fraction {
+                        ProgressView(value: fraction)
+                            .frame(width: 90)
+                    } else {
+                        ProgressView().controlSize(.small)
+                    }
+                    Text(scan.statusText)
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.secondaryText)
+                        .lineLimit(1)
+                    Button("取消") { importer.cancelScan() }
+                        .controlSize(.small)
+                }
             } else if importer.sourceFileCount > 0 {
                 Text("\(importer.sourceFileCount) 个文件 · \(ByteCountFormatter.string(fromByteCount: importer.sourceBytes, countStyle: .file))")
                     .font(.system(size: 11))
@@ -258,6 +269,21 @@ struct ImportView: View {
 
     // MARK: - 源文件预览
 
+    /// 预览总共最多展示这么多张，避免几千张卡把布局拖垮。
+    private let totalPreviewLimit = 300
+
+    private var limitedGroups: [ImportDayGroup] {
+        var remaining = totalPreviewLimit
+        return importer.dayGroups.map { group in
+            var copy = group
+            let shown = max(0, min(remaining, group.assets.count))
+            copy.assets = Array(group.assets.prefix(shown))
+            copy.hiddenCount = group.assets.count - shown
+            remaining -= shown
+            return copy
+        }
+    }
+
     private var previewArea: some View {
         Group {
             if importer.assets.isEmpty {
@@ -265,15 +291,26 @@ struct ImportView: View {
                     Image(systemName: "square.and.arrow.down")
                         .font(.system(size: 28))
                         .foregroundStyle(theme.secondaryText)
-                    Text(importer.isScanning ? "正在读取来源…" : "选一张 SD 卡或文件夹开始导入")
+                    Text(importer.isScanning ? (importer.scanState?.statusText ?? "正在扫描…") : "选一张 SD 卡或文件夹开始导入")
                         .font(.system(size: 12.5))
                         .foregroundStyle(theme.secondaryText)
+                    if let warning = importer.scanWarning {
+                        Text(warning)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.orange)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 30)
+                    }
+                    if importer.isScanning {
+                        Button("取消扫描") { importer.cancelScan() }
+                            .controlSize(.small)
+                    }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 14) {
-                        ForEach(importer.dayGroups) { group in
+                        ForEach(limitedGroups) { group in
                             daySection(group)
                         }
                     }
@@ -295,11 +332,11 @@ struct ImportView: View {
             }
 
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 84, maximum: 120), spacing: 10)], spacing: 10) {
-                ForEach(group.assets.prefix(previewLimit)) { asset in
+                ForEach(group.assets) { asset in
                     ImportAssetCell(asset: asset, cache: cache, theme: theme)
                 }
-                if group.assets.count > previewLimit {
-                    Text("还有 \(group.assets.count - previewLimit) 张未显示")
+                if group.hiddenCount > 0 {
+                    Text("还有 \(group.hiddenCount) 张未显示")
                         .font(.system(size: 10.5))
                         .foregroundStyle(theme.secondaryText)
                         .frame(maxWidth: .infinity, alignment: .leading)

@@ -45,6 +45,7 @@ struct SelfTest {
             try imageFormats(root: root)
             try importFlow(root: root)
             try rotation(root: root)
+            try scanning(root: root)
             reviewSession()
             shortcuts()
         } catch {
@@ -252,6 +253,37 @@ struct SelfTest {
     }
 
     // MARK: - 审阅模块逻辑
+
+    /// 扫描范围：有 DCIM 只扫 DCIM；普通文件夹最多 3 层；会回报进度。
+    private mutating func scanning(root: URL) throws {
+        section("16. 导入来源扫描范围")
+        let card = root.appendingPathComponent("ScanCard", isDirectory: true)
+        let dcim = card.appendingPathComponent("DCIM/100CANON", isDirectory: true)
+        try FileManager.default.createDirectory(at: dcim, withIntermediateDirectories: true)
+        try ShutterKeeperCLI.writeTestJPEG(to: dcim.appendingPathComponent("IN_DCIM.JPG"))
+        try ShutterKeeperCLI.writeTestJPEG(to: card.appendingPathComponent("TOP_LEVEL.JPG"))
+
+        let plain = root.appendingPathComponent("PlainFolder", isDirectory: true)
+        let deep = plain.appendingPathComponent("a/b", isDirectory: true)
+        try FileManager.default.createDirectory(at: deep, withIntermediateDirectories: true)
+        try ShutterKeeperCLI.writeTestJPEG(to: plain.appendingPathComponent("PLAIN_TOP.JPG"))
+        try ShutterKeeperCLI.writeTestJPEG(to: deep.appendingPathComponent("PLAIN_DEEP.JPG"))
+
+        let cardFiles = VolumeScanner.mediaFiles(in: card)
+        check(cardFiles.count == 1, "有 DCIM 时只扫 DCIM（找到 \(cardFiles.count) 个）")
+        check(cardFiles.first?.lastPathComponent == "IN_DCIM.JPG", "卡根目录的杂项文件不会被当成素材")
+
+        let plainFiles = VolumeScanner.mediaFiles(in: plain)
+        check(plainFiles.count == 2, "普通文件夹最多扫 3 层（找到 \(plainFiles.count) 个）")
+
+        var progressCalls = 0
+        _ = VolumeScanner.mediaFiles(in: card, onProgress: { _ in progressCalls += 1 })
+        check(progressCalls > 0, "扫描过程中会回报进度（\(progressCalls) 次）")
+
+        // 取消标记生效：立刻取消应该扫不到东西
+        let cancelled = VolumeScanner.mediaFiles(in: plain, isCancelled: { true })
+        check(cancelled.isEmpty, "取消后立刻停止扫描（找到 \(cancelled.count) 个）")
+    }
 
     /// 旋转：非破坏性，只改方向标记（JPG/TIFF 文件内、RAW 写侧车）。
     private mutating func rotation(root: URL) throws {

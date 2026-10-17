@@ -23,9 +23,17 @@ public enum ImportExecutor {
         var outcome = ImportOutcome()
         let fileManager = FileManager.default
         let conflictMap = Dictionary(uniqueKeysWithValues: plan.conflicts.map { ($0.task.source.path, $0) })
+        var lastReportAt = Date.distantPast
 
         func report(_ progress: ImportProgress) {
-            options.progress?(progress)
+            // 限流：每拷 4MB 就回调一次会把主线程淹掉（尤其整卡导入时），
+            // 这里最多 10 次/秒，最后的收尾进度一定发出。
+            guard let handler = options.progress else { return }
+            let now = Date()
+            if progress.phase == .finishing || now.timeIntervalSince(lastReportAt) > 0.1 {
+                lastReportAt = now
+                handler(progress)
+            }
         }
         func cancelled() -> Bool {
             options.shouldCancel?() ?? false

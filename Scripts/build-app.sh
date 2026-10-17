@@ -14,7 +14,7 @@ cd "$ROOT"
 
 APP_NAME="快门闪选"
 BUNDLE_ID="com.shutterkeeper.app"
-VERSION="beta-0.11"
+VERSION="beta-0.12"
 BUILD_NUMBER="1"
 AUTHOR="快门镖局-陈师"
 CONTACT="thechengsir@foxmail.com"
@@ -82,6 +82,16 @@ cat > "$CONTENTS/Info.plist" <<PLIST
     <true/>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
+    <key>NSRemovableVolumesUsageDescription</key>
+    <string>读取 SD 卡 / U 盘上的照片，才能把它们导入到你的照片库。</string>
+    <key>NSNetworkVolumesUsageDescription</key>
+    <string>读取网络卷上的照片，才能把它们导入到你的照片库。</string>
+    <key>NSDesktopFolderUsageDescription</key>
+    <string>读取桌面上的照片，才能审阅、改名或导入。</string>
+    <key>NSDocumentsFolderUsageDescription</key>
+    <string>读取文稿目录里的照片，才能审阅、改名或导入。</string>
+    <key>NSDownloadsFolderUsageDescription</key>
+    <string>读取下载目录里的照片，才能审阅、改名或导入。</string>
     <key>NSHumanReadableCopyright</key>
     <string>© 2026 ${AUTHOR} · ${CONTACT}</string>
     <key>CFBundleGetInfoString</key>

@@ -18,7 +18,8 @@ public enum ImportPlanner {
         projectFolderSuffix: String? = nil,
         folderNameOverride: String? = nil
     ) -> ImportPlan {
-        var groups = Pairing.group(sourceFiles)
+        // 分组 + 一次性把附属文件挂上（不要每组再列一次目录）
+        var groups = Pairing.attachSidecars(Pairing.group(sourceFiles), allFiles: sourceFiles)
         // 分组之后补齐拍摄日期（照片读 EXIF，视频退到文件创建日期），
         // 项目文件夹名里的日期就是从这里来的
         for index in groups.indices {

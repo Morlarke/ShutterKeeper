@@ -22,12 +22,13 @@ public struct SourceVolume: Identifiable, Sendable, Hashable {
 }
 
 public extension Array where Element == SourceVolume {
-    /// 优先选：有 DCIM 的外接设备 → 有 DCIM 的卷 → 其它外接设备 → 第一个卷。
+    /// 只自动选**有 DCIM 的相机卡**。
+    ///
+    /// 以前会退而求其次选「任何外接盘」，结果可能一启动就去深扫一块几 TB 的普通硬盘，
+    /// 界面看起来就像死了。没有相机卡时留空，让用户自己选。
     var preferredSource: SourceVolume? {
         first { $0.hasMedia && $0.isExternal }
             ?? first { $0.hasMedia }
-            ?? first { $0.isExternal }
-            ?? first
     }
 }
 
@@ -90,18 +91,58 @@ public enum VolumeScanner {
 
     /// 扫描一个来源（卷或者任意文件夹），找出所有素材文件。
     ///
-    /// 相机卡的目录通常只有两级（DCIM/100CANON），但为了兼容把文件直接放在根目录的卡，
-    /// 这里做有限深度（默认 3 层）的遍历，并跳过系统目录。
-    public static func mediaFiles(in source: URL, maxDepth: Int = 3) -> [URL] {
+    /// 扫描范围会按来源类型收窄，避免误选一块普通硬盘时深扫几万个文件：
+    /// * 有 `DCIM` 的相机卡：只扫 DCIM（照片在 `DCIM/<子目录>` 里）
+    /// * 挂在 `/Volumes` 下但没有 DCIM 的卷：只扫顶层，不递归
+    /// * 用户自己选的普通文件夹：最多 3 层
+    public static func mediaFiles(
+        in source: URL,
+        maxDepth: Int = 3,
+        fileLimit: Int = 20_000,
+        isCancelled: () -> Bool = { false },
+        onProgress: ((ScanProgress) -> Void)? = nil
+    ) -> [URL] {
         let fileManager = FileManager.default
         let skipped: Set<String> = [
             ".Spotlight-V100", ".Trashes", ".fseventsd", ".TemporaryItems", "System Volume Information",
         ]
+        let dcim = dcimFolders(in: source)
+        let isVolumeRoot = source.deletingLastPathComponent().standardizedFileURL.path == "/Volumes"
+        let roots: [(url: URL, depth: Int)]
+        let effectiveDepth: Int
+        if !dcim.isEmpty {
+            roots = dcim.map { ($0, 0) }
+            effectiveDepth = 1
+        } else if isVolumeRoot {
+            roots = [(source, 0)]
+            effectiveDepth = 1
+        } else {
+            roots = [(source, 0)]
+            effectiveDepth = maxDepth
+        }
+
         var results: [URL] = []
-        var frontier: [(url: URL, depth: Int)] = [(source, 0)]
+        var frontier = roots
+        var foldersScanned = 0
+        var limited = false
+        var lastReport = Date()
+
+        func reportIfNeeded(force: Bool = false) {
+            guard let onProgress else { return }
+            if force || Date().timeIntervalSince(lastReport) > 0.1 {
+                lastReport = Date()
+                onProgress(ScanProgress(foldersScanned: foldersScanned, filesFound: results.count, limitReached: limited))
+            }
+        }
 
         while !frontier.isEmpty {
+            if isCancelled() { break }
+            if results.count >= fileLimit {
+                limited = true
+                break
+            }
             let (directory, depth) = frontier.removeFirst()
+            foldersScanned += 1
             let items = (try? fileManager.contentsOfDirectory(
                 at: directory,
                 includingPropertiesForKeys: [.isDirectoryKey, .isRegularFileKey, .isHiddenKey],
@@ -111,7 +152,7 @@ public enum VolumeScanner {
                 guard let values = try? item.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey]) else { continue }
                 if values.isDirectory == true {
                     if skipped.contains(item.lastPathComponent) { continue }
-                    if depth < maxDepth { frontier.append((item, depth + 1)) }
+                    if depth < effectiveDepth { frontier.append((item, depth + 1)) }
                     continue
                 }
                 guard values.isRegularFile == true else { continue }
@@ -120,8 +161,18 @@ public enum VolumeScanner {
                 guard kind != .other || sidecar else { continue }
                 results.append(item)
             }
+            reportIfNeeded()
         }
+        reportIfNeeded(force: true)
         return results.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
+    }
+
+    /// 扫描进度（给导入界面显示用）。
+    public struct ScanProgress: Sendable {
+        public let foldersScanned: Int
+        public let filesFound: Int
+        /// 是否因为达到文件上限而提前结束。
+        public let limitReached: Bool
     }
 
     /// 卷的剩余空间。

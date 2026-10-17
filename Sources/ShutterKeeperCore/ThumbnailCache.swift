@@ -12,6 +12,10 @@ import UniformTypeIdentifiers
 public actor ThumbnailCache {
     public let root: URL
     private var inFlight: [String: Task<CGImage?, Never>] = [:]
+    /// 同时在解码的缩略图数量上限，避免一次几十张 RAW 把 CPU 打满。
+    private let maxConcurrentRenders = 4
+    private var activeRenders = 0
+    private var waitingSlots: [CheckedContinuation<Void, Never>] = []
 
     public init(root: URL) throws {
         self.root = root
@@ -22,21 +26,48 @@ public actor ThumbnailCache {
         let key = cacheKey(for: file, maxPixel: maxPixel)
         if let task = inFlight[key] { return await task.value }
 
-        let task = Task<CGImage?, Never> { [root] in
+        let task = Task<CGImage?, Never> { [root, self] in
             let cacheURL = ThumbnailCache.cacheURL(root: root, key: key)
             if let cached = ThumbnailCache.decodeImage(at: cacheURL) {
                 return cached
             }
-            guard let rendered = await ThumbnailCache.render(file: file, maxPixel: maxPixel) else {
-                return nil
+
+            // 解码放到独立任务里并发跑（以前在 actor 内部串行解码，
+            // 导入预览和审阅胶片条会互相排队，看起来像卡死）。
+            await self.acquireRenderSlot()
+            let rendered = await Task.detached(priority: .utility) {
+                await ThumbnailCache.render(file: file, maxPixel: maxPixel)
+            }.value
+            await self.releaseRenderSlot()
+
+            if let rendered {
+                ThumbnailCache.encode(image: rendered, to: cacheURL)
             }
-            ThumbnailCache.encode(image: rendered, to: cacheURL)
             return rendered
         }
         inFlight[key] = task
         let image = await task.value
         inFlight[key] = nil
         return image
+    }
+
+    private func acquireRenderSlot() async {
+        if activeRenders < maxConcurrentRenders {
+            activeRenders += 1
+            return
+        }
+        await withCheckedContinuation { continuation in
+            waitingSlots.append(continuation)
+        }
+    }
+
+    private func releaseRenderSlot() {
+        if waitingSlots.isEmpty {
+            activeRenders = max(0, activeRenders - 1)
+        } else {
+            let next = waitingSlots.removeFirst()
+            next.resume()
+        }
     }
 
     public func removeAll() throws {
