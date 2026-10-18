@@ -50,7 +50,7 @@ final class KeyboardController: ObservableObject {
         monitor = nil
     }
 
-    /// 正在输入文字时不要抢按键（例如手动输入项目名、自定义文本框）。
+    /// 正在输入文字时不要抢按键（例如修改拍摄日期、自定义文本框）。
     private var isTyping: Bool {
         if let responder = NSApp.keyWindow?.firstResponder {
             if let textView = responder as? NSTextView, textView.isEditable { return true }

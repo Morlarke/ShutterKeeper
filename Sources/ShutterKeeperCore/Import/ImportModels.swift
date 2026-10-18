@@ -2,27 +2,23 @@ import Foundation
 
 /// 导入设置。
 public struct ImportSettings: Sendable {
-    /// 项目名（用户输入，可留空）。
-    public var projectName: String
     /// 日期格式，默认与偏好设置一致。
     public var dateFormat: String
-    /// 项目文件夹里日期部分用哪一天；nil 表示用源文件里最早的拍摄日期。
+    /// 目标文件夹名里的日期用哪一天；nil 表示用源文件里最早的拍摄日期。
     public var explicitDate: Date?
-    /// 目标父目录：项目文件夹建在它下面。
+    /// 目标父目录：`日期Photos` / `日期Videos` 直接建在它下面。
     public var destinationRoot: URL
     /// 备份位置；`copyToBackup` 为真时使用。
     public var backupRoot: URL?
     public var copyToBackup: Bool
 
     public init(
-        projectName: String = "",
         dateFormat: String = "yyyymmdd",
         explicitDate: Date? = nil,
         destinationRoot: URL,
         backupRoot: URL? = nil,
         copyToBackup: Bool = false
     ) {
-        self.projectName = projectName
         self.dateFormat = dateFormat
         self.explicitDate = explicitDate
         self.destinationRoot = destinationRoot
@@ -83,11 +79,11 @@ public enum ImportDecision: String, Sendable {
     case overwrite
 }
 
-/// 目标项目文件夹已存在时怎么办。
+/// 目标文件夹已存在时怎么办。
 public enum ProjectFolderDecision: String, Sendable {
     /// 合并进已有文件夹
     case merge
-    /// 新建一个带后缀的文件夹（项目名-2）
+    /// 新建一个带后缀的文件夹（`日期Photos-2` / `日期Videos-2`）
     case newFolder
     /// 取消导入
     case cancel
@@ -96,8 +92,12 @@ public enum ProjectFolderDecision: String, Sendable {
 /// 导入计划。
 public struct ImportPlan: Sendable {
     public var settings: ImportSettings
-    public let projectFolderName: String
-    public let projectURL: URL
+    /// 日期部分，例如 `20260917`，用来拼两个目标文件夹名。
+    public let dateKey: String
+    /// 照片目标文件夹：`<日期>Photos`
+    public let photosFolderURL: URL
+    /// 视频目标文件夹：`<日期>Videos`
+    public let videosFolderURL: URL
     public let assets: [AssetGroup]
     public let tasks: [ImportTask]
     public let conflicts: [ImportConflict]
@@ -105,13 +105,34 @@ public struct ImportPlan: Sendable {
     public let photoCount: Int
     public let videoCount: Int
     public let pairedCount: Int
+    public let hasPhotoTasks: Bool
+    public let hasVideoTasks: Bool
     /// 目标卷剩余空间（字节）；取不到就是 nil。
     public let destinationFreeSpace: Int64?
     /// 备份卷剩余空间。
     public let backupFreeSpace: Int64?
 
     public var destinationExists: Bool {
-        FileManager.default.fileExists(atPath: projectURL.path)
+        FileManager.default.fileExists(atPath: photosFolderURL.path)
+            || FileManager.default.fileExists(atPath: videosFolderURL.path)
+    }
+
+    /// 这次会创建的文件夹（只列有内容的）。
+    public var targetFolders: [URL] {
+        var result: [URL] = []
+        if hasPhotoTasks { result.append(photosFolderURL) }
+        if hasVideoTasks { result.append(videosFolderURL) }
+        return result
+    }
+
+    /// 展示用，例如「20260917Photos + 20260917Videos」。
+    public var folderSummary: String {
+        targetFolders.map { $0.lastPathComponent }.joined(separator: " + ")
+    }
+
+    /// 主文件夹（用于「在访达中显示」与导入历史）。
+    public var primaryFolderURL: URL {
+        hasPhotoTasks ? photosFolderURL : videosFolderURL
     }
 
     public var hasEnoughSpace: Bool {

@@ -368,7 +368,7 @@ struct SelfTest {
         check(pngOutcome.errors.isEmpty, "不支持不等于出错")
     }
 
-    /// 导入：项目文件夹命名、RAW+JPG 配对、附属文件、备份、历史、冲突、取消。
+    /// 导入：平级的照片/视频文件夹命名、RAW+JPG 配对、附属文件、备份、历史、冲突、取消。
     private mutating func importFlow(root: URL) throws {
         section("14. 导入")
         let card = root.appendingPathComponent("FakeCard", isDirectory: true)
@@ -402,7 +402,7 @@ struct SelfTest {
         }
 
         // 2. 计划
-        let settings = ImportSettings(projectName: "婚礼", destinationRoot: destination)
+        let settings = ImportSettings(destinationRoot: destination)
         let plan = ImportPlanner.plan(
             sourceFiles: refs,
             settings: settings,
@@ -410,7 +410,9 @@ struct SelfTest {
             sourceRoot: card,
             importedHistory: []
         )
-        check(plan.projectFolderName == "20260927_婚礼", "项目文件夹名：20260927_婚礼（实际 \(plan.projectFolderName)）")
+        check(plan.photosFolderURL.lastPathComponent == "20260927Photos", "照片文件夹名：20260927Photos（实际 \(plan.photosFolderURL.lastPathComponent)）")
+        check(plan.videosFolderURL.lastPathComponent == "20260927Videos", "视频文件夹名：20260927Videos（实际 \(plan.videosFolderURL.lastPathComponent)）")
+        check(plan.photosFolderURL.deletingLastPathComponent().standardizedFileURL == destination.standardizedFileURL, "两个文件夹直接建在目标位置下（不再套项目文件夹）")
         check(plan.photoCount == 2 && plan.pairedCount == 2, "照片 2 张、其中配对 2 组")
         check(plan.videoCount == 1, "视频 1 个")
         check(plan.tasks.count == 6, "共 6 个文件要搬（实际 \(plan.tasks.count)）")
@@ -426,8 +428,8 @@ struct SelfTest {
         check(outcome.failures.isEmpty, "导入没有失败项")
         check(outcome.copied.count == 6, "复制了 6 个文件（实际 \(outcome.copied.count)）")
 
-        let photos = plan.projectURL.appendingPathComponent("Photos")
-        let videos = plan.projectURL.appendingPathComponent("Videos")
+        let photos = plan.photosFolderURL
+        let videos = plan.videosFolderURL
         check(FileManager.default.fileExists(atPath: photos.appendingPathComponent("A_0001.NEF").path), "RAW 进了 Photos/")
         check(FileManager.default.fileExists(atPath: photos.appendingPathComponent("A_0001.JPG").path), "JPG 进了 Photos/")
         check(FileManager.default.fileExists(atPath: photos.appendingPathComponent("A_0001.xmp").path), "侧车文件跟着进了 Photos/")
@@ -454,12 +456,15 @@ struct SelfTest {
         check(skipOutcome.copied.isEmpty && skipOutcome.skipped.count == 6, "冲突的文件全部跳过")
 
         // 6. 目标文件夹已存在 → 建一个带后缀的新文件夹
-        let alternative = ImportPlanner.availableFolderName(base: plan.projectFolderName, in: destination)
-        check(alternative == "20260927_婚礼-2", "目标重名时的新名字：20260927_婚礼-2（实际 \(alternative)）")
+        let suffix = ImportPlanner.availableFolderSuffix(dateKey: plan.dateKey, in: destination)
+        check(suffix == "-2", "目标重名时用后缀 -2（实际 \(suffix)）")
 
         // 7. 备份：结构与主导入一致
+        // 用另一个目标位置，避免和第一次导入的文件夹撞名（这样才测得到备份本身）
+        let backupMainDestination = root.appendingPathComponent("备份主导入", isDirectory: true)
+        try FileManager.default.createDirectory(at: backupMainDestination, withIntermediateDirectories: true)
         var backupSettings = settings
-        backupSettings.projectName = "备份测试"
+        backupSettings.destinationRoot = backupMainDestination
         backupSettings.backupRoot = backup
         backupSettings.copyToBackup = true
         let backupPlan = ImportPlanner.plan(
@@ -471,14 +476,14 @@ struct SelfTest {
         )
         let backupOutcome = ImportExecutor.run(plan: backupPlan)
         check(backupOutcome.backupFailures.isEmpty, "备份没有失败项")
-        let backupPhotos = backupPlan.projectURL.appendingPathComponent("Photos")
-        let backupVideos = backupPlan.projectURL.appendingPathComponent("Videos")
+        let backupPhotos = backupPlan.photosFolderURL
+        let backupVideos = backupPlan.videosFolderURL
         check(
-            backupPlan.settings.backupRoot.map { FileManager.default.fileExists(atPath: $0.appendingPathComponent("20260927_备份测试/Photos/A_0001.JPG").path) } == true,
+            backupPlan.settings.backupRoot.map { FileManager.default.fileExists(atPath: $0.appendingPathComponent("20260927Photos/A_0001.JPG").path) } == true,
             "备份目录结构与主导入完全一致"
         )
         check(
-            backupPlan.settings.backupRoot.map { FileManager.default.fileExists(atPath: $0.appendingPathComponent("20260927_备份测试/Videos/MVI_0001.MOV").path) } == true,
+            backupPlan.settings.backupRoot.map { FileManager.default.fileExists(atPath: $0.appendingPathComponent("20260927Videos/MVI_0001.MOV").path) } == true,
             "备份里视频也在 Videos/"
         )
         _ = backupPhotos
@@ -489,7 +494,7 @@ struct SelfTest {
         try FileManager.default.createDirectory(at: cancelDestination, withIntermediateDirectories: true)
         let cancelPlan = ImportPlanner.plan(
             sourceFiles: refs,
-            settings: ImportSettings(projectName: "取消测试", destinationRoot: cancelDestination),
+            settings: ImportSettings(destinationRoot: cancelDestination),
             volumeName: "FakeCard",
             sourceRoot: card,
             importedHistory: []
@@ -500,7 +505,7 @@ struct SelfTest {
         check(cancelOutcome.cancelled, "取消被正确标记")
         check(cancelOutcome.copied.isEmpty, "取消后没有拷贝成功的文件")
         let leftover = (try? FileManager.default.contentsOfDirectory(
-            at: cancelPlan.projectURL.appendingPathComponent("Photos"),
+            at: cancelPlan.photosFolderURL,
             includingPropertiesForKeys: nil
         )) ?? []
         check(leftover.isEmpty, "取消后目标里没有残留文件（实际 \(leftover.count) 个）")

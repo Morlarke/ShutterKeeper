@@ -10,7 +10,7 @@ public enum XMPPacket {
     public static let namespaceAdobeMeta = "adobe:ns:meta/"
     /// JPEG APP1 段的标识字符串，以 NUL 结尾。
     public static let jpegAPP1Identifier = "http://ns.adobe.com/xap/1.0/"
-    public static let toolkit = "ShutterKeeper beta-0.12"
+    public static let toolkit = "ShutterKeeper beta-0.13"
 
     // MARK: - 生成
 

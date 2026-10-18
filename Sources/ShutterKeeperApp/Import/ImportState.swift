@@ -75,7 +75,6 @@ final class ImportState: ObservableObject {
     @Published private(set) var sourceBytes: Int64 = 0
     @Published private(set) var sourceFileCount = 0
 
-    @Published var projectName = ""
     @Published var dateText = ""
     @Published var destinationRoot: URL?
     @Published var backupRoot: URL?
@@ -89,7 +88,7 @@ final class ImportState: ObservableObject {
     @Published var progress: ImportProgress?
     @Published var statusMessage: String?
     @Published var errorMessage: String?
-    /// 目标项目文件夹已存在，等用户决定。
+    /// 目标文件夹已存在，等用户决定。
     @Published var projectFolderConflict = false
     /// 文件级冲突，等用户决定。
     @Published var pendingConflicts: [ImportConflict] = []
@@ -102,8 +101,8 @@ final class ImportState: ObservableObject {
     private let scanCancelFlag = CancellationFlag()
     private var scanTask: Task<Void, Never>?
     private var history: ImportHistoryStore?
-    /// 目标已存在时用户选择「新建带后缀」后的名字。
-    private var folderNameOverride: String?
+    /// 目标已存在时用户选择「新建带后缀」后的后缀（例如 `-2`）。
+    private var folderSuffixOverride = ""
 
     /// 导入成功后回调，通知主状态「刚导入的文件夹是这里」。
     var onDidImport: ((URL) -> Void)?
@@ -144,7 +143,7 @@ final class ImportState: ObservableObject {
         scanCancelFlag.reset()
         source = url
         sourceLabel = label ?? url.lastPathComponent
-        folderNameOverride = nil
+        folderSuffixOverride = ""
         assets = []
         dayGroups = []
         plan = nil
@@ -309,7 +308,6 @@ final class ImportState: ObservableObject {
 
     var settings: ImportSettings {
         ImportSettings(
-            projectName: projectName,
             dateFormat: UserDefaults.standard.string(forKey: PrefKey.dateFormat) ?? "yyyymmdd",
             explicitDate: parsedExplicitDate,
             destinationRoot: destinationRoot ?? defaultDestination,
@@ -335,12 +333,12 @@ final class ImportState: ObservableObject {
             volumeName: identity?.name,
             sourceRoot: identity?.root,
             importedHistory: historyKeys,
-            folderNameOverride: folderNameOverride
+            folderSuffix: folderSuffixOverride
         )
     }
 
     func chooseDestination() {
-        guard let url = FolderPicker.chooseFolder(message: "选择导入的目标位置（项目文件夹建在这里）") else { return }
+        guard let url = FolderPicker.chooseFolder(message: "选择导入的目标位置（日期Photos / 日期Videos 建在这里）") else { return }
         destinationRoot = url
         UserDefaults.standard.set(url.path, forKey: PrefKey.importDestinationRoot)
         rebuildPlan()
@@ -396,7 +394,7 @@ final class ImportState: ObservableObject {
     func resolveFolderConflictNewFolder() {
         projectFolderConflict = false
         guard let plan, let destinationRoot = settings.destinationRoot as URL? else { return }
-        folderNameOverride = ImportPlanner.availableFolderName(base: plan.projectFolderName, in: destinationRoot)
+        folderSuffixOverride = ImportPlanner.availableFolderSuffix(dateKey: plan.dateKey, in: destinationRoot)
         rebuildPlan()
         guard let newPlan = self.plan else { return }
         if !newPlan.conflicts.isEmpty {
@@ -454,7 +452,7 @@ final class ImportState: ObservableObject {
                 self.isImporting = false
                 self.progress = nil
                 self.lastOutcome = outcome
-                self.lastProjectURL = plan.projectURL
+                self.lastProjectURL = plan.primaryFolderURL
                 if !outcome.failures.isEmpty {
                     self.errorMessage = outcome.failures
                         .prefix(6)
@@ -467,7 +465,7 @@ final class ImportState: ObservableObject {
                 self.statusMessage = summary
                 if !outcome.copied.isEmpty {
                     self.askToTrashSources = true
-                    self.onDidImport?(plan.projectURL)
+                    self.onDidImport?(plan.primaryFolderURL)
                 }
             }
         }
@@ -500,7 +498,7 @@ final class ImportState: ObservableObject {
         scanSource()
     }
 
-    /// 在访达里显示刚导入的项目文件夹。
+    /// 在访达里显示刚导入的文件夹。
     func revealProject() {
         guard let url = lastProjectURL else { return }
         FolderPicker.reveal(url)

@@ -2,11 +2,10 @@ import Foundation
 
 /// 把一个来源（SD 卡目录或任意文件夹）规划成一次导入。
 ///
-/// 目录结构（需求文档 5.2）：
+/// 目录结构：在目标位置**平级**建两个文件夹，命名是「拍摄日期 + Photos / Videos」：
 /// ```
-/// <父目录>/<日期_项目名>/
-/// ├── Photos/    RAW、JPG、TIFF 等照片（以及配套的 .xmp 附属文件）
-/// └── Videos/    视频
+/// <父目录>/20260917Photos/   RAW、JPG、TIFF 等照片（以及配套的 .xmp 附属文件）
+/// <父目录>/20260917Videos/   视频
 /// ```
 public enum ImportPlanner {
     public static func plan(
@@ -15,13 +14,12 @@ public enum ImportPlanner {
         volumeName: String? = nil,
         sourceRoot: URL? = nil,
         importedHistory: Set<String> = [],
-        projectFolderSuffix: String? = nil,
-        folderNameOverride: String? = nil
+        folderSuffix: String = ""
     ) -> ImportPlan {
         // 分组 + 一次性把附属文件挂上（不要每组再列一次目录）
         var groups = Pairing.attachSidecars(Pairing.group(sourceFiles), allFiles: sourceFiles)
         // 分组之后补齐拍摄日期（照片读 EXIF，视频退到文件创建日期），
-        // 项目文件夹名里的日期就是从这里来的
+        // 两个目标文件夹名里的日期就是从这里来的
         for index in groups.indices {
             FolderScanner.enrich(&groups[index])
         }
@@ -31,8 +29,7 @@ public enum ImportPlanner {
             volumeName: volumeName,
             sourceRoot: sourceRoot,
             importedHistory: importedHistory,
-            projectFolderSuffix: projectFolderSuffix,
-            folderNameOverride: folderNameOverride
+            folderSuffix: folderSuffix
         )
     }
 
@@ -43,19 +40,18 @@ public enum ImportPlanner {
         volumeName: String? = nil,
         sourceRoot: URL? = nil,
         importedHistory: Set<String> = [],
-        projectFolderSuffix: String? = nil,
-        folderNameOverride: String? = nil
+        folderSuffix: String = ""
     ) -> ImportPlan {
         let captureDates = groups.compactMap(\.captureDate)
         let date = settings.explicitDate ?? captureDates.min()
-        let folderName = folderNameOverride
-            ?? projectFolderName(settings: settings, date: date, suffix: projectFolderSuffix)
-        let projectURL = settings.destinationRoot.appendingPathComponent(folderName, isDirectory: true)
-        let photosURL = projectURL.appendingPathComponent("Photos", isDirectory: true)
-        let videosURL = projectURL.appendingPathComponent("Videos", isDirectory: true)
-        let backupProjectURL = settings.copyToBackup
-            ? settings.backupRoot?.appendingPathComponent(folderName, isDirectory: true)
-            : nil
+        let dateText = date.map { dateString(for: $0, format: settings.dateFormat) } ?? ""
+        let photosName = dateText + "Photos" + folderSuffix
+        let videosName = dateText + "Videos" + folderSuffix
+        let photosURL = settings.destinationRoot.appendingPathComponent(photosName, isDirectory: true)
+        let videosURL = settings.destinationRoot.appendingPathComponent(videosName, isDirectory: true)
+        let backupRoot = settings.copyToBackup ? settings.backupRoot : nil
+        let backupPhotosURL = backupRoot?.appendingPathComponent(photosName, isDirectory: true)
+        let backupVideosURL = backupRoot?.appendingPathComponent(videosName, isDirectory: true)
 
         var tasks: [ImportTask] = []
         var conflicts: [ImportConflict] = []
@@ -63,6 +59,8 @@ public enum ImportPlanner {
         var photoCount = 0
         var videoCount = 0
         var pairedCount = 0
+        var photoTasks = 0
+        var videoTasks = 0
 
         for group in groups {
             if group.isVideo {
@@ -76,8 +74,7 @@ public enum ImportPlanner {
             for file in group.files {
                 let folder = group.isVideo ? videosURL : photosURL
                 let destination = folder.appendingPathComponent(file.fileName)
-                let backup = backupProjectURL?
-                    .appendingPathComponent(group.isVideo ? "Videos" : "Photos", isDirectory: true)
+                let backup = (group.isVideo ? backupVideosURL : backupPhotosURL)?
                     .appendingPathComponent(file.fileName)
                 let task = ImportTask(
                     source: file.url,
@@ -89,6 +86,7 @@ public enum ImportPlanner {
                     isVideo: group.isVideo
                 )
                 tasks.append(task)
+                if group.isVideo { videoTasks += 1 } else { photoTasks += 1 }
                 totalBytes += task.fileSize
                 if let conflict = conflict(
                     for: task,
@@ -104,8 +102,7 @@ public enum ImportPlanner {
             for sidecar in group.sidecars {
                 let folder = group.isVideo ? videosURL : photosURL
                 let destination = folder.appendingPathComponent(sidecar.fileName)
-                let backup = backupProjectURL?
-                    .appendingPathComponent(group.isVideo ? "Videos" : "Photos", isDirectory: true)
+                let backup = (group.isVideo ? backupVideosURL : backupPhotosURL)?
                     .appendingPathComponent(sidecar.fileName)
                 let size = (try? sidecar.url.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init) ?? 0
                 let task = ImportTask(
@@ -118,6 +115,7 @@ public enum ImportPlanner {
                     isVideo: group.isVideo
                 )
                 tasks.append(task)
+                if group.isVideo { videoTasks += 1 } else { photoTasks += 1 }
                 totalBytes += task.fileSize
                 if let conflict = conflict(
                     for: task,
@@ -132,8 +130,9 @@ public enum ImportPlanner {
 
         return ImportPlan(
             settings: settings,
-            projectFolderName: folderName,
-            projectURL: projectURL,
+            dateKey: dateText,
+            photosFolderURL: photosURL,
+            videosFolderURL: videosURL,
             assets: groups,
             tasks: tasks,
             conflicts: conflicts,
@@ -141,6 +140,8 @@ public enum ImportPlanner {
             photoCount: photoCount,
             videoCount: videoCount,
             pairedCount: pairedCount,
+            hasPhotoTasks: photoTasks > 0,
+            hasVideoTasks: videoTasks > 0,
             destinationFreeSpace: VolumeScanner.freeSpace(of: settings.destinationRoot),
             backupFreeSpace: settings.backupRoot.flatMap { VolumeScanner.freeSpace(of: $0) }
         )
@@ -170,16 +171,6 @@ public enum ImportPlanner {
         return nil
     }
 
-    /// 项目文件夹名：`日期_项目名`，两段都可以为空。
-    public static func projectFolderName(settings: ImportSettings, date: Date?, suffix: String? = nil) -> String {
-        let dateText = date.map { dateString(for: $0, format: settings.dateFormat) } ?? ""
-        let name = sanitize(settings.projectName)
-        var components = [dateText, name].filter { !$0.isEmpty }
-        if let suffix, !suffix.isEmpty { components.append(suffix) }
-        let base = components.joined(separator: "_")
-        return base.isEmpty ? "未命名导入" : base
-    }
-
     static func dateString(for date: Date, format: String) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -195,16 +186,21 @@ public enum ImportPlanner {
         return trimmed.components(separatedBy: invalid).joined()
     }
 
-    /// 目标文件夹已存在时，找一个带后缀的新名字：`婚礼-2`、`婚礼-3`…
-    public static func availableFolderName(base: String, in root: URL) -> String {
+    /// 目标文件夹已存在时，找一个可用的后缀：`-2`、`-3`…
+    ///
+    /// 加在日期后面的两个文件夹上，例如 `20260917Photos-2` / `20260917Videos-2`。
+    public static func availableFolderSuffix(dateKey: String, in root: URL) -> String {
         let fileManager = FileManager.default
         var index = 2
-        var candidate = "\(base)-\(index)"
-        while fileManager.fileExists(atPath: root.appendingPathComponent(candidate).path) {
+        while index <= 999 {
+            let suffix = "-\(index)"
+            let photos = root.appendingPathComponent(dateKey + "Photos" + suffix).path
+            let videos = root.appendingPathComponent(dateKey + "Videos" + suffix).path
+            if !fileManager.fileExists(atPath: photos), !fileManager.fileExists(atPath: videos) {
+                return suffix
+            }
             index += 1
-            candidate = "\(base)-\(index)"
-            if index > 999 { break }
         }
-        return candidate
+        return ""
     }
 }

@@ -41,17 +41,15 @@ public enum ImportExecutor {
 
         // 目标目录
         do {
-            try fileManager.createDirectory(at: plan.projectURL, withIntermediateDirectories: true)
-            try fileManager.createDirectory(
-                at: plan.projectURL.appendingPathComponent("Photos", isDirectory: true),
-                withIntermediateDirectories: true
-            )
-            try fileManager.createDirectory(
-                at: plan.projectURL.appendingPathComponent("Videos", isDirectory: true),
-                withIntermediateDirectories: true
-            )
+            // 只创建这次真的有内容的文件夹
+            if plan.hasPhotoTasks {
+                try fileManager.createDirectory(at: plan.photosFolderURL, withIntermediateDirectories: true)
+            }
+            if plan.hasVideoTasks {
+                try fileManager.createDirectory(at: plan.videosFolderURL, withIntermediateDirectories: true)
+            }
         } catch {
-            outcome.failures.append((plan.projectURL, "无法创建目标文件夹：\(error.localizedDescription)"))
+            outcome.failures.append((plan.primaryFolderURL, "无法创建目标文件夹：\(error.localizedDescription)"))
             return outcome
         }
 
@@ -184,7 +182,7 @@ public enum ImportExecutor {
                     relativePath: VolumeScanner.relativePath(of: task.source, from: sourceRoot),
                     fileName: task.source.lastPathComponent,
                     fileSize: task.fileSize,
-                    projectPath: plan.projectURL.path
+                    projectPath: plan.primaryFolderURL.path
                 )
             }
             try? history.record(entries)

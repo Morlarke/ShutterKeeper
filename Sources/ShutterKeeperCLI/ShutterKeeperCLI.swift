@@ -268,11 +268,13 @@ struct ShutterKeeperCLI {
         let backupRoot = value(for: "--backup").map { URL(fileURLWithPath: $0) }
 
         var settings = ImportSettings(
-            projectName: value(for: "--name") ?? "",
             destinationRoot: destinationRoot,
             backupRoot: backupRoot,
             copyToBackup: backupRoot != nil
         )
+        if value(for: "--name") != nil {
+            print("提示：新版按「拍摄日期Photos / 拍摄日期Videos」命名，--name 不再参与命名。")
+        }
         if let dateText = value(for: "--date") {
             let formatter = DateFormatter()
             formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -321,22 +323,21 @@ struct ShutterKeeperCLI {
             importedHistory: historyKeys
         )
         if plan.destinationExists && !merge {
-            let base = plan.projectFolderName
-            let alternative = ImportPlanner.availableFolderName(base: base, in: destinationRoot)
-            print("目标文件夹已存在：\(plan.projectURL.path)")
-            print("将新建带后缀的文件夹：\(alternative)（想合并进已有文件夹就加 --merge）")
+            let suffix = ImportPlanner.availableFolderSuffix(dateKey: plan.dateKey, in: destinationRoot)
+            print("目标里已有同名文件夹：\(plan.folderSummary)")
+            print("将新建带后缀的：\(plan.dateKey)Photos\(suffix) / \(plan.dateKey)Videos\(suffix)（想合并就加 --merge）")
             plan = ImportPlanner.plan(
                 sourceFiles: fileRefs,
                 settings: settings,
                 volumeName: volumeName,
                 sourceRoot: sourceRoot,
                 importedHistory: historyKeys,
-                folderNameOverride: alternative
+                folderSuffix: suffix
             )
         }
 
         print("来源：\(source.path)")
-        print("目标项目：\(plan.projectURL.path)")
+        for folder in plan.targetFolders { print("目标文件夹：\(folder.path)") }
         print("照片 \(plan.photoCount) 张（其中配对 \(plan.pairedCount) 组）、视频 \(plan.videoCount) 个、共 \(plan.tasks.count) 个文件")
         print("总大小：\(ByteCountFormatter.string(fromByteCount: plan.totalBytes, countStyle: .file))")
         if let free = plan.destinationFreeSpace {

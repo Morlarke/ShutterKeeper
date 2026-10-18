@@ -3,7 +3,7 @@ import SwiftUI
 
 /// 导入模块。
 ///
-/// 从上到下：来源选择 → 项目设置（项目名/日期/目标/备份）→ 源文件按拍摄日期分组预览 → 进度与执行。
+/// 从上到下：来源选择 → 拍摄日期/目标/备份 → 源文件按拍摄日期分组预览 → 进度与执行。
 struct ImportView: View {
     @ObservedObject var importer: ImportState
     let theme: AppTheme
@@ -30,7 +30,7 @@ struct ImportView: View {
             Button("新建带后缀的文件夹") { importer.resolveFolderConflictNewFolder() }
             Button("取消", role: .cancel) { importer.cancelFolderConflict() }
         } message: {
-            Text("\(importer.plan?.projectURL.path ?? "")\n\n合并会把文件放进已有文件夹；新建会创建「\(importer.plan?.projectFolderName ?? "")-2」这样的新文件夹。")
+            Text("目标位置里已经有同名文件夹：\n\(importer.plan?.folderSummary ?? "")\n\n合并会把文件放进已有文件夹；新建会加后缀（例如 \(importer.plan?.dateKey ?? "")Photos-2）。")
         }
         .alert(
             "有 \(importer.pendingConflicts.count) 个文件需要决定",
@@ -178,16 +178,7 @@ struct ImportView: View {
     private var settingsBar: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 12) {
-                Text("项目名")
-                    .font(.system(size: 11))
-                    .foregroundStyle(theme.secondaryText)
-                TextField("例如 婚礼", text: $importer.projectName)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 150)
-                    .disabled(importer.isImporting)
-                    .onChange(of: importer.projectName) { _, _ in importer.rebuildPlan() }
-
-                Text("日期")
+                Text("拍摄日期")
                     .font(.system(size: 11))
                     .foregroundStyle(theme.secondaryText)
                 TextField(hintDate, text: $importer.dateText)
@@ -195,6 +186,9 @@ struct ImportView: View {
                     .frame(width: 120)
                     .disabled(importer.isImporting)
                     .onChange(of: importer.dateText) { _, _ in importer.rebuildPlan() }
+                Text("用于生成「日期Photos / 日期Videos」两个文件夹")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(theme.secondaryText)
 
                 Text("目标位置")
                     .font(.system(size: 11))
@@ -234,7 +228,7 @@ struct ImportView: View {
                 Spacer()
 
                 if let plan = importer.plan {
-                    Text("将创建：\(plan.projectURL.lastPathComponent)/")
+                    Text("将创建：\(plan.folderSummary)/")
                         .font(.system(size: 11.5, weight: .medium))
                     Text("Photos \(plan.photoCount) 张 · Videos \(plan.videoCount) 个")
                         .font(.system(size: 11))
